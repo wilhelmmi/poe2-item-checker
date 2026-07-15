@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "samples": [
+    {
+      "id": "magic_ashen_staff",
+      "expected_trade": "vendor",
+      "raw_text": "Item Class: Staves\nRarity: Magic\nVorpal Ashen Staff of Siphoning\n--------\nRequires: Level 44\n--------\nItem Level: 66\n--------\nGrants Skill: Level 14 Firebolt\n--------\n{ Prefix Modifier \"Vorpal\" (Tier: 3) — Damage, Elemental, Lightning }\nGain 44(43-48)% of Damage as Extra Lightning Damage\n{ Suffix Modifier \"of Siphoning\" (Tier: 3) — Mana }\nGain 23(21-27) Mana per enemy killed"
+    },
+    {
+      "id": "magic_30ms_boots",
+      "expected_trade": "test_1_ex",
+      "expected_upgrade": "conditional_upgrade_or_sidegrade",
+      "raw_text": "Item Class: Boots\nRarity: Magic\nCheetah's Dunerunner Sandals of the Narwhal\n--------\nEnergy Shield: 63\n--------\nRequires: Level 59, 78 Int\n--------\nItem Level: 66\n--------\n{ Prefix Modifier \"Cheetah's\" (Tier: 2) — Speed }\n30% increased Movement Speed\n{ Suffix Modifier \"of the Narwhal\" (Tier: 6) — Elemental, Cold, Resistance }\n+20(16-20)% to Cold Resistance"
+    },
+    {
+      "id": "rare_vile_robe",
+      "expected_trade": "test_1_ex_or_price_check",
+      "expected_upgrade": "likely_upgrade",
+      "raw_text": "Item Class: Body Armours\nRarity: Rare\nViper Coat\nVile Robe\n--------\nEnergy Shield: 206 (augmented)\n--------\nRequires: Level 65, 121 Int\n--------\nSockets: S S\n--------\nItem Level: 65\n--------\n{ Prefix Modifier \"Glowing\" (Tier: 8) — Energy Shield }\n+35(31-35) to maximum Energy Shield\n{ Prefix Modifier \"Rotund\" (Tier: 7) — Life }\n+96(85-99) to maximum Life\n{ Suffix Modifier \"of the Hydra\" (Tier: 7) — Life }\n8.7(6.1-9) Life Regeneration per second\n{ Suffix Modifier \"of the Furnace\" (Tier: 4) — Elemental, Fire, Resistance }\n+29(26-30)% to Fire Resistance"
+    },
+    {
+      "id": "magic_vile_robe_spirit",
+      "expected_trade": "test_1_ex",
+      "raw_text": "Item Class: Body Armours\nRarity: Magic\nViscountess' Vile Robe of the Skilled\n--------\nEnergy Shield: 171\n--------\nRequires: Level 65, 121 Int\n--------\nItem Level: 65\n--------\n{ Prefix Modifier \"Viscountess'\" (Tier: 6) }\n+39 to Spirit\n{ Suffix Modifier \"of the Skilled\" (Tier: 4) }\n+155 to Stun Threshold"
+    },
+    {
+      "id": "magic_dueling_wand_lightning",
+      "expected_trade": "vendor",
+      "expected_upgrade": "downgrade",
+      "raw_text": "Item Class: Wands\nRarity: Magic\nDueling Wand\n--------\nItem Level: 66\n--------\nGrants Skill: Level 14 Spellslinger\n--------\n{ Prefix Modifier (Tier: 3) — Damage, Elemental, Lightning }\n84% increased Lightning Damage\n{ Suffix Modifier (Tier: 6) — Mana }\n11% increased Mana Regeneration Rate"
+    }
+  ]
+}

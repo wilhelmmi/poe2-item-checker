@@ -1,0 +1,1 @@
+Item Class: Staves Rarity: Magic Vorpal Ashen Staff of Siphoning -------- Requires: Level 44 -------- Item Level: 66 -------- Grants Skill: Level 14 Firebolt -------- { Prefix Modifier "Vorpal" (Tier: 3) — Damage, Elemental, Lightning } Gain 44(43-48)% of Damage as Extra Lightning Damage { Suffix Modifier "of Siphoning" (Tier: 3) — Mana } Gain 23(21-27) Mana per enemy killed

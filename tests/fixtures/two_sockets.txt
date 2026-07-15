@@ -1,0 +1,13 @@
+Item Class: Body Armours
+Rarity: Rare
+Havoc Mantle
+Hexer's Robe
+--------
+Requirements:
+Level: 40
+Int: 70
+--------
+Sockets: S S
+Energy Shield: 206 (augmented)
+Item Level: 52
+

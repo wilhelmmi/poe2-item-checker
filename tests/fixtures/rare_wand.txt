@@ -1,0 +1,26 @@
+Item Class: Wands
+Rarity: Rare
+Bramble Needle
+Withered Wand
+--------
+Requirements:
+Level: 26
+Int: 55
+--------
+Item Level: 37
+Sockets: S
+--------
+25% increased Spell Damage (rune)
+{ Prefix Modifier "Apprentice's" (Tier: 8) — Damage, Caster }
+30(25-34)% increased Spell Damage
+{ Prefix Modifier "Chaotic" (Tier: 5) — Chaos, Caster }
+18% increased Chaos Damage
+{ Prefix Modifier "Scholar's" (Tier: 6) — Mana }
++45 to maximum Mana
+{ Suffix Modifier "of Anarchy" (Tier: 5) — Chaos, Caster, Gem }
++1 to Level of all Chaos Spell Skills
+{ Suffix Modifier "of Aptitude" (Tier: 7) — Attribute }
++20 to Intelligence
+{ Suffix Modifier "of Shaping" (Tier: 8) — Caster }
+9% increased Cast Speed
+

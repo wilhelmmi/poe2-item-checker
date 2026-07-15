@@ -1,0 +1,8 @@
+Item Class: Wands
+Rarity: Magic
+Chaotic Withered Wand
+Withered Wand
+--------
+Item Level: 12
+Grants Skill: Level 4 Chaos Bolt
+

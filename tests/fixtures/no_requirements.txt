@@ -1,0 +1,9 @@
+Item Class: Rings
+Rarity: Rare
+Doom Circle
+Ruby Ring
+--------
+Item Level: 25
+--------
++17% to Fire Resistance
+

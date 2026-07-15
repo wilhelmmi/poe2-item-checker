@@ -1,0 +1,8 @@
+Item Class: Wands
+Rarity: Magic
+Apprentice's Wand
+Attuned Wand
+--------
+{ Prefix Modifier "Apprentice's" (Tier: 8) — Damage, Caster }
+30(25-34)% increased Spell Damage
+
