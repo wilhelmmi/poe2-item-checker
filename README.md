@@ -69,9 +69,33 @@ Die Frontend-Abhängigkeiten sind auf konkrete Versionen festgelegt und durch
 ```bash
 .venv/bin/pytest
 .venv/bin/ruff check app tests
-cd frontend && npm run build
+cd frontend && npm run test && npm run build
 docker build -t poe2-checker:latest .
 ```
+
+## Pull Requests und CI
+
+Änderungen werden auf einem Feature-Branch umgesetzt und lokal mit den oben genannten
+Prüfungen validiert. Nicht triviale Änderungen werden zusätzlich durch einen Review-Agenten
+geprüft. Anschließend wird der Branch gepusht und ein Draft Pull Request gegen `main`
+geöffnet; Commits oder automatische Merges direkt auf `main` sind nicht Teil dieses Ablaufs.
+
+GitHub Actions führt für Pull Requests gegen `main` die Backend-Prüfungen mit Python 3.12,
+die Frontend-Tests und den Frontend-Build mit Node.js 22 sowie danach einen vollständigen
+Docker-Build ohne Push aus. Der Workflow kann außerdem manuell gestartet werden und prüft
+den Stand von `main` nach einem Merge erneut.
+
+Damit GitHub den Ablauf erzwingt, muss für `main` in den Repository-Einstellungen ein
+Branch Ruleset oder eine Branch-Protection-Regel mit folgenden Vorgaben eingerichtet werden:
+
+- Änderungen nur über Pull Requests zulassen; eine GitHub-Freigabe ist nicht erforderlich,
+  da nicht triviale Änderungen bereits lokal durch einen Review-Agenten geprüft werden.
+- Die Statuschecks `Backend`, `Frontend` und `Docker` vor dem Merge voraussetzen.
+- Direkte Pushes auf `main` unterbinden; Ausnahmen und Force-Pushes nicht zulassen.
+- Automatisches Mergen deaktiviert lassen.
+
+Die Regeln werden bewusst in GitHub konfiguriert, da sie nicht allein durch eine Datei im
+Repository wirksam erzwungen werden können.
 
 ## Container
 
