@@ -5,6 +5,38 @@ React/Vite-Frontend, verlustbewahrendem Parser und einem konservativen regelbasi
 Faktencheck. Equipmentvergleich, Upgrade- oder Score-Logik, OCR, Livepreise und eine
 vollständige produktive UI sind bewusst noch nicht implementiert.
 
+## Schnellstart auf einem neuen Rechner
+
+Voraussetzungen: Git, Python 3.12, Node.js 22 und npm.
+
+```bash
+git clone https://github.com/wilhelmmi/poe2-item-checker.git
+cd poe2-item-checker
+
+python3.12 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+cp .env.example .env
+.venv/bin/alembic upgrade head
+
+cd frontend
+npm ci
+cd ..
+```
+
+Danach Backend und Frontend in zwei Terminals starten:
+
+```bash
+# Terminal 1 (Repository-Root)
+.venv/bin/uvicorn app.main:app --reload --port 8080
+
+# Terminal 2 (Repository-Root)
+cd frontend
+npm run dev
+```
+
+Das Frontend ist anschließend unter `http://localhost:5173` erreichbar. Alternativ lässt
+sich das gesamte Projekt mit `docker compose up --build` starten.
+
 ## Lokale Entwicklung
 
 Voraussetzungen: Python 3.12, Node.js 22 und npm.
