@@ -1,13 +1,18 @@
 import json
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 import app.api.routes as routes
 from app.core.config import Settings, get_settings
+from app.db.models import Base
+from app.db.session import enable_sqlite_foreign_keys
 from app.evaluation.openai_provider import OpenAIEvaluationProvider
 from app.evaluation.provider import EvaluationProviderError
 from app.evaluation.schemas import EvaluationResult
@@ -45,6 +50,28 @@ class FailingProvider(FakeProvider):
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def isolated_db(tmp_path: Path) -> Iterator[None]:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'evaluation.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(engine, "connect", enable_sqlite_foreign_keys)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine, expire_on_commit=False)
+
+    async def override() -> AsyncIterator[Session]:
+        with factory() as session:
+            yield session
+
+    app.dependency_overrides[routes.database] = override
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(routes.database, None)
+        engine.dispose()
 
 
 @pytest.mark.anyio
