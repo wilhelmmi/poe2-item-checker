@@ -103,6 +103,13 @@ Repository wirksam erzwungen werden können.
 docker compose up --build
 ```
 
+Die optionale AI-Bewertung liest den Schlüssel ausschließlich serverseitig. Für lokale
+Compose-Nutzung kann `OPENAI_API_KEY` in der nicht versionierten `.env` gesetzt werden.
+Alternativ kann ein Docker Secret beziehungsweise eine schreibgeschützte Datei eingebunden
+und im Container mit `OPENAI_API_KEY_FILE=/run/secrets/openai_api_key` referenziert werden.
+Ohne Schlüssel startet die App weiterhin; der Evaluate-Endpunkt liefert dann den lokalen
+Faktencheck zusammen mit einem typisierten `provider_not_configured`-Fallback.
+
 Oder direkt:
 
 ```bash
@@ -170,3 +177,30 @@ Modifier erzwingen konservativ `manual_review` und `needs_review`; ein separat e
 Granted Skill ohne eigene Normalisierung zählt nicht automatisch als unbekannter Affix.
 Rollpositionen werden nur bei genau einem Wert und einer Range arithmetisch berechnet,
 nicht begrenzt; umgedrehte oder außerhalb liegende Ergebnisse erzeugen Warncodes.
+
+## Profil, Equipment und harte Checks
+
+`GET /api/profile` und `PUT /api/profile` verwalten genau ein lokales Charakterprofil.
+`GET /api/equipment` liefert stets alle zehn Slots; `PUT /api/equipment/{slot}` ersetzt
+einen Slot nach vollständigem serverseitigem Parse. Ersetzte Items bleiben für die spätere
+Historie erhalten. `ring_1` und `ring_2` sind eigenständige Slots.
+
+Der dokumentierte Seed mit `schema_version: 1` kann weiterhin atomar an
+`POST /api/equipment/import` gesendet werden. `GET /api/equipment/export` erzeugt einen
+verlustfreien Snapshot mit `schema_version: 2`: sämtliche Profilfelder und alle zehn Slots
+sind enthalten, leere Slots ausdrücklich als `null`. Beim Import eines v2-Snapshots werden
+solche Slots geleert; bei einem ungültigen Item wird gar nichts verändert.
+
+`POST /api/items/evaluate` akzeptiert zusätzlich `target_slot` und `use_profile`. Die
+Response enthält deterministische `hard_checks` für Level/Attributes, Resistenz-Caps,
+Spirit und bei Boots einen Movement-Speed-Verlust. Diese Checks werden ausschließlich
+serverseitig aus bekannten Profil-, Equipment- und Parserwerten erzeugt. Fehlende Werte
+ergeben `unknown`, niemals geschätzte Werte; der AI-Provider kann die Checks nicht ändern.
+
+Der lokale Build-Fit-Scorer wird durch die strikt validierte, versionierte Konfiguration
+`app/rules/build-fit-v1.json` gesteuert. Candidate und Equipped Item durchlaufen exakt
+dieselbe 0–100-Logik; die Response nennt Regel-Evidence, Delta und die lokale Kategorie.
+Rings werden ohne expliziten Zielslot gegen beide Ring-Slots verglichen. Harte Swap-Checks
+prüfen auch Requirements der verbleibenden Ausrüstung und können eine positive
+Score-Kategorie nur konservativer machen. Die lokalen Scores bleiben auch ohne API-Key
+verfügbar; AI-Ausgaben dienen ausschließlich als nachgeordnete Erklärung.

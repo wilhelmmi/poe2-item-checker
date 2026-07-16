@@ -54,6 +54,24 @@ export type Evidence = { rule_id: string; message: string; matched_facts: string
 export type Assessment = { outcome: string; confidence: string; confidence_reasons: string[]; evidence: Evidence[] }
 export type FactsCheck = { facts: ItemFacts; trade: Assessment; crafting: Assessment; warnings: string[]; disclaimer: string }
 export type CheckResponse = { parse: ParseResponse; assessment: FactsCheck | null }
+export type AiSection = { reasons: string[]; warnings: string[] }
+export type EvaluationResult = {
+  build: AiSection & { suitability: string }
+  trade: AiSection & { recommendation: string }
+  crafting: AiSection & { recommendation: string }
+  confidence: string
+  confidence_reasons: string[]
+  warnings: string[]
+}
+export type EvaluateResponse = {
+  parse: ParseResponse; local_check: FactsCheck; evaluation: EvaluationResult | null
+  provider: string | null; model: string | null; provider_status: 'success' | 'unavailable'
+  provider_error: { code: string; message: string } | null; disclaimer: string
+  hard_checks: { target_slot: string | null; checks: { code: string; status: 'pass' | 'fail' | 'unknown'; message: string; before: number | null; after: number | null; required: number | null }[] }
+  local_comparison: { recommended_target: string | null; comparisons: { target_slot: string; candidate: { score: number; evidence: { rule_id: string; points: number; message: string }[]; unknown_modifier_count: number; completeness: string; warnings: string[] }; equipped: { score: number; evidence: { rule_id: string; points: number; message: string }[]; unknown_modifier_count: number; completeness: string; warnings: string[] } | null; delta: number | null; delta_band: string | null; category: string; warnings: string[]; hard_checks: EvaluateResponse['hard_checks'] }[] }
+}
+export type Profile = { name: string; build_stage: string; character_level: number | null; life: number | null; energy_shield: number | null; mana: number | null; spirit: number | null; spirit_required: number | null; spirit_reserved: number | null; strength: number | null; dexterity: number | null; intelligence: number | null; fire_resistance: number | null; cold_resistance: number | null; lightning_resistance: number | null; chaos_resistance: number | null; resistance_cap: number; notes: string }
+export type Equipment = { slots: Record<string, { id: string; item: ParsedItem } | null> }
 
 export async function parseItem(rawText: string, signal: AbortSignal): Promise<ParseResponse> {
   const response = await fetch('/api/items/parse', {
@@ -77,3 +95,20 @@ export async function checkItem(rawText: string, signal: AbortSignal): Promise<C
   if (!response.ok) throw new Error(`Faktencheck fehlgeschlagen (${response.status}).`)
   return response.json() as Promise<CheckResponse>
 }
+
+export async function evaluateItem(rawText: string, signal: AbortSignal, targetSlot?: string): Promise<EvaluateResponse> {
+  const response = await fetch('/api/items/evaluate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_text: rawText, target_slot: targetSlot }), signal,
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: { message?: string } } | null
+    throw new Error(body?.detail?.message ?? `AI-Bewertung fehlgeschlagen (${response.status}).`)
+  }
+  return response.json() as Promise<EvaluateResponse>
+}
+
+export async function loadProfile(): Promise<Profile> { const response = await fetch('/api/profile'); if (!response.ok) throw new Error('Profil konnte nicht geladen werden.'); return response.json() as Promise<Profile> }
+export async function saveProfile(profile: Profile): Promise<Profile> { const response = await fetch('/api/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) }); if (!response.ok) throw new Error('Profil konnte nicht gespeichert werden.'); return response.json() as Promise<Profile> }
+export async function loadEquipment(): Promise<Equipment> { const response = await fetch('/api/equipment'); if (!response.ok) throw new Error('Equipment konnte nicht geladen werden.'); return response.json() as Promise<Equipment> }
+export async function saveEquipment(slot: string, raw_text: string): Promise<void> { const response = await fetch(`/api/equipment/${slot}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text }) }); if (!response.ok) throw new Error('Equipment konnte nicht gespeichert werden.') }

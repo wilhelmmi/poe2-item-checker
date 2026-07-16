@@ -7,6 +7,7 @@ NORMALIZATION_PATTERNS = (
     (re.compile(r"Level of all Spell Skills", re.I), "all_spell_skill_levels"),
     (re.compile(r"increased Chaos Damage", re.I), "increased_chaos_damage"),
     (re.compile(r"increased Cast Speed", re.I), "increased_cast_speed"),
+    (re.compile(r"reduced Cast Speed", re.I), "reduced_cast_speed"),
     (re.compile(r"Gain .+ of Damage as Extra Lightning Damage", re.I), "extra_lightning_damage"),
     (re.compile(r"Mana per enemy killed", re.I), "mana_per_enemy_killed"),
     (re.compile(r"increased Movement Speed", re.I), "movement_speed"),
@@ -18,9 +19,14 @@ NORMALIZATION_PATTERNS = (
     (re.compile(r"to maximum Life", re.I), "maximum_life"),
     (re.compile(r"Life Regeneration per second", re.I), "life_regeneration"),
     (re.compile(r"to Spirit", re.I), "spirit"),
+    (re.compile(r"to all Attributes", re.I), "all_attributes"),
+    (re.compile(r"to Strength", re.I), "strength"),
+    (re.compile(r"to Dexterity", re.I), "dexterity"),
+    (re.compile(r"to Intelligence", re.I), "intelligence"),
     (re.compile(r"to Stun Threshold", re.I), "stun_threshold"),
     (re.compile(r"increased Lightning Damage", re.I), "increased_lightning_damage"),
     (re.compile(r"increased Mana Regeneration Rate", re.I), "mana_regeneration"),
+    (re.compile(r"to maximum Mana", re.I), "maximum_mana"),
 )
 KNOWN_NORMALIZED_KEYS = frozenset(key for _, key in NORMALIZATION_PATTERNS)
 

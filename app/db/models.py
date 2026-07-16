@@ -15,10 +15,13 @@ class CharacterProfile(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     build_stage: Mapped[str] = mapped_column(String(50), default="early_endgame")
+    character_level: Mapped[int | None]
     life: Mapped[int | None]
     energy_shield: Mapped[int | None]
     mana: Mapped[int | None]
     spirit: Mapped[int | None]
+    spirit_required: Mapped[int | None]
+    spirit_reserved: Mapped[int | None]
     strength: Mapped[int | None]
     dexterity: Mapped[int | None]
     intelligence: Mapped[int | None]
@@ -85,7 +88,7 @@ class EquipmentSlot(Base):
     __tablename__ = "equipment_slots"
     character_id: Mapped[int] = mapped_column(ForeignKey("character_profiles.id"), primary_key=True)
     slot: Mapped[str] = mapped_column(String(30), primary_key=True)
-    item_id: Mapped[str] = mapped_column(ForeignKey("items.id"), unique=True)
+    item_id: Mapped[str | None] = mapped_column(ForeignKey("items.id"), unique=True)
 
 
 class Evaluation(Base):

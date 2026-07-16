@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from './App'
-import { CheckResponse, ParseResponse } from './api'
+import { CheckResponse, EvaluateResponse, ParseResponse } from './api'
 
 const parsed: ParseResponse = {
   item: {
@@ -34,6 +34,33 @@ const checked: CheckResponse = {
     warnings: ['slot_hint_unknown'], disclaimer: 'Keine garantierte Marktpreisermittlung.',
   },
 }
+
+const evaluated: EvaluateResponse = {
+  parse: parsed, local_check: checked.assessment!, provider: 'fake', model: 'mock-model',
+  disclaimer: 'Keine garantierte Live-Marktpreisermittlung.', provider_status: 'success', provider_error: null,
+  hard_checks: { target_slot: null, checks: [{ code: 'requirement_level', status: 'unknown', message: 'Wert fehlt.', before: null, after: null, required: null }] },
+  local_comparison: { recommended_target: 'wand', comparisons: [{ target_slot: 'wand', candidate: { score: 30, evidence: [{ rule_id: 'base', points: 30, message: 'Candidate' }], unknown_modifier_count: 0, completeness: 'complete', warnings: [] }, equipped: { score: 20, evidence: [{ rule_id: 'base', points: 20, message: 'Equipped' }], unknown_modifier_count: 0, completeness: 'complete', warnings: [] }, delta: 10, delta_band: 'positive', category: 'upgrade', warnings: [], hard_checks: { target_slot: 'wand', checks: [] } }] },
+  evaluation: {
+    build: { suitability: 'unknown_without_profile', reasons: ['Profil fehlt.'], warnings: [] },
+    trade: { recommendation: 'manual_review', reasons: ['Keine Live-Daten.'], warnings: [] },
+    crafting: { recommendation: 'needs_review', reasons: ['Prüfen.'], warnings: [] },
+    confidence: 'low', confidence_reasons: ['Equipment fehlt.'], warnings: [],
+  },
+}
+
+const evaluationFallback: EvaluateResponse = {
+  parse: parsed, local_check: checked.assessment!, evaluation: null,
+  provider: null, model: null, provider_status: 'unavailable',
+  provider_error: { code: 'provider_not_configured', message: 'AI ist nicht konfiguriert.' },
+  disclaimer: 'Lokaler Fallback wurde ausgeführt.',
+  hard_checks: { target_slot: null, checks: [] },
+  local_comparison: { recommended_target: null, comparisons: [] },
+}
+const profile = { name: 'Chaos DoT Lich', build_stage: 'early_endgame', character_level: 70,
+  life: 1000, energy_shield: 2000, mana: 500, spirit: 120, spirit_required: 100,
+  spirit_reserved: 90, strength: 20, dexterity: 30, intelligence: 100,
+  fire_resistance: 75, cold_resistance: 75, lightning_resistance: 75,
+  chaos_resistance: 20, resistance_cap: 75, notes: 'Test' }
 
 function response(body: unknown, ok = true, status = 200) {
   return { ok, status, json: async () => body } as Response
@@ -158,5 +185,140 @@ describe('manual parse preview', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Faktencheck ausführen' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Faktencheck fehlgeschlagen')
     expect(screen.queryByText('Lokaler Faktencheck')).toBeNull()
+  })
+
+  it('runs AI evaluation only after its explicit action', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(parsed)).mockResolvedValueOnce(response(evaluated))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'item' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    const button = await screen.findByRole('button', { name: 'AI-Bewertung ausführen' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    fireEvent.click(button)
+    expect(await screen.findByText('Lokaler Equipmentvergleich')).toBeTruthy()
+    expect(screen.getByText('wand: positive')).toBeTruthy()
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/items/evaluate')
+    expect(screen.getByText(/mock-model/)).toBeTruthy()
+  })
+
+  it('shows the local fallback when the provider is unavailable', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(parsed)).mockResolvedValueOnce(response(evaluationFallback))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'item' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'AI-Bewertung ausführen' }))
+    expect(await screen.findByText('Lokaler Faktencheck')).toBeTruthy()
+    expect(screen.getByText(/AI ist nicht konfiguriert/)).toBeTruthy()
+    expect(screen.getByText(/provider_not_configured/)).toBeTruthy()
+  })
+
+  it('ignores a delayed AI response after a new parse starts', async () => {
+    let resolveEvaluation: (value: Response) => void = () => undefined
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(parsed))
+      .mockReturnValueOnce(new Promise<Response>(resolve => { resolveEvaluation = resolve }))
+      .mockResolvedValueOnce(response(parsed))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    const input = screen.getByLabelText('Englischen Itemtext einfügen')
+    fireEvent.change(input, { target: { value: 'first' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'AI-Bewertung ausführen' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    resolveEvaluation(response(evaluated))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(screen.queryByText('Lokaler Equipmentvergleich')).toBeNull()
+  })
+
+  it('ignores a delayed AI response after accepting a line-break suggestion', async () => {
+    let resolveEvaluation: (value: Response) => void = () => undefined
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(suggested))
+      .mockReturnValueOnce(new Promise<Response>(resolve => { resolveEvaluation = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'collapsed' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    await screen.findByLabelText('Editierbarer Vorschlag')
+    fireEvent.click(screen.getByRole('button', { name: 'AI-Bewertung ausführen' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschlag übernehmen' }))
+    resolveEvaluation(response(evaluated))
+    await waitFor(() => expect(screen.queryByText('Lokaler Equipmentvergleich')).toBeNull())
+    expect(screen.queryByText('Lokaler Faktencheck')).toBeNull()
+  })
+
+  it('invalidates an existing AI result and facts when the target slot changes', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(parsed)).mockResolvedValueOnce(response(evaluated))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'item' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'AI-Bewertung ausführen' }))
+    await screen.findByText('Lokaler Equipmentvergleich')
+    expect(screen.getByText('Lokaler Faktencheck')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Equipment-Slot'), { target: { value: 'boots' } })
+    expect(screen.queryByText('Lokaler Equipmentvergleich')).toBeNull()
+    expect(screen.queryByText('Lokaler Faktencheck')).toBeNull()
+  })
+
+  it('ignores a delayed AI response when the target slot changes', async () => {
+    let resolveEvaluation: (value: Response) => void = () => undefined
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(parsed)).mockReturnValueOnce(new Promise<Response>(resolve => { resolveEvaluation = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'item' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'AI-Bewertung ausführen' }))
+    fireEvent.change(screen.getByLabelText('Equipment-Slot'), { target: { value: 'boots' } })
+    resolveEvaluation(response(evaluated))
+    await waitFor(() => expect(screen.queryByText('Lokaler Equipmentvergleich')).toBeNull())
+  })
+
+  it('edits every hard-check profile field and preserves nullable numbers', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(profile)).mockResolvedValueOnce(response({ ...profile, life: null }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Profil laden' }))
+    await screen.findByLabelText('Spirit Required')
+    for (const label of ['Life', 'Energy Shield', 'Mana', 'Spirit', 'Spirit Reserved', 'Fire Resistance', 'Cold Resistance', 'Lightning Resistance', 'Chaos Resistance', 'Resistance Cap', 'Build Stage', 'Notes']) {
+      expect(screen.getByLabelText(label)).toBeTruthy()
+    }
+    fireEvent.change(screen.getByLabelText('Life'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Profil speichern' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string).life).toBeNull()
+  })
+
+  it('shows equipped evidence and invalidates comparison when profile context loads', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(parsed)).mockResolvedValueOnce(response(evaluated)).mockResolvedValueOnce(response(profile))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'item' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'AI-Bewertung ausführen' }))
+    expect(await screen.findByText('Equipped Evidence')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Profil laden' }))
+    expect(screen.queryByText('Lokaler Equipmentvergleich')).toBeNull()
+  })
+
+  it('invalidates an evaluation started while a profile load is pending', async () => {
+    let resolveProfile: (value: Response) => void = () => undefined
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (input === '/api/profile') return new Promise<Response>(resolve => { resolveProfile = resolve })
+      if (input === '/api/items/parse') return Promise.resolve(response(parsed))
+      if (input === '/api/items/evaluate') return Promise.resolve(response(evaluated))
+      return Promise.reject(new Error('unexpected request'))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Profil laden' }))
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'), { target: { value: 'item' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analysieren' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'AI-Bewertung ausführen' }))
+    await screen.findByText('Lokaler Equipmentvergleich')
+    resolveProfile(response(profile))
+    await waitFor(() => expect(screen.queryByText('Lokaler Equipmentvergleich')).toBeNull())
   })
 })
