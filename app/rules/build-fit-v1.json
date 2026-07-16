@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "base_score": 20,
+  "modifier_weights": {
+    "all_chaos_spell_skill_levels": 28,
+    "all_spell_skill_levels": 24,
+    "increased_chaos_damage": 14,
+    "increased_spell_damage": 10,
+    "increased_cast_speed": 6,
+    "reduced_cast_speed": -10,
+    "maximum_life": 8,
+    "maximum_energy_shield": 7,
+    "spirit": 10,
+    "fire_resistance": 5,
+    "cold_resistance": 5,
+    "lightning_resistance": 5,
+    "chaos_resistance": 4,
+    "movement_speed": 18,
+    "intelligence": 4,
+    "all_attributes": 4,
+    "mana_regeneration": 2,
+    "maximum_mana": 2
+  },
+  "slot_multipliers": {
+    "wand": {"all_chaos_spell_skill_levels": 1.5, "all_spell_skill_levels": 1.4},
+    "boots": {"movement_speed": 1.5},
+    "amulet": {"spirit": 1.4},
+    "focus": {"maximum_energy_shield": 1.3},
+    "body_armour": {"maximum_energy_shield": 1.3}
+  },
+  "defence_caps": {"energy_shield": 15, "life": 12}
+}
