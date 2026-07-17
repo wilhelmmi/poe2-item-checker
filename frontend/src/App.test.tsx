@@ -51,4 +51,15 @@ describe('API-only comparison', () => {
     expect(await screen.findByText(/mehrdeutig/)).toBeTruthy();expect(screen.getByLabelText('Manueller Formatierungsvorschlag')).toBeTruthy()
     expect(fetchMock.mock.calls.some(call=>call[0]==='/api/items/evaluate')).toBe(false)
   })
+  it('formats a complete equipment paste immediately', async () => {
+    const original='Item Class: Foci Rarity: Rare Empyrean Emblem Runed Focus'
+    const formatted='Item Class: Foci\nRarity: Rare\nEmpyrean Emblem\nRuned Focus'
+    const safe={item:{...parsedItem,raw_text:original},warnings:[],line_break_suggestion:{suggested_text:formatted,insertions:[]},auto_format_status:'safe'}
+    vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response(safe)))
+    render(<App/>);await screen.findByText(/Quelle und Variante/)
+    const textarea=screen.getByLabelText('Itemtext des Slots') as HTMLTextAreaElement
+    fireEvent.paste(textarea,{clipboardData:{getData:()=>original}})
+    await waitFor(()=>expect(textarea.value).toBe(formatted))
+    expect(screen.getByText('Equipment-Text wurde automatisch formatiert.')).toBeTruthy()
+  })
 })

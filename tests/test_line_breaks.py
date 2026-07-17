@@ -76,3 +76,17 @@ def test_terminal_line_break_is_already_multiline_for_suggestion_purposes() -> N
 def test_valid_modifier_header_in_unanchored_free_text_is_ignored() -> None:
     raw = 'notes { Prefix Modifier "Vorpal" (Tier: 3) — Damage } more'
     assert suggest_line_breaks(raw) is None
+
+
+def test_collapsed_rare_name_and_focus_base_are_separated_insert_only() -> None:
+    raw = (
+        "Item Class: Foci Rarity: Rare Empyrean Emblem Runed Focus -------- "
+        "Energy Shield: 83 (augmented) -------- Item Level: 67"
+    )
+    suggestion = suggest_line_breaks(raw)
+    assert suggestion is not None
+    assert "Empyrean Emblem\n Runed Focus" in suggestion.suggested_text
+    offsets = [insertion.offset for insertion in suggestion.insertions]
+    assert _remove_insertions(suggestion.suggested_text, offsets) == raw
+    item = parse_item_text(suggestion.suggested_text)
+    assert (item.name, item.base_type) == ("Empyrean Emblem", "Runed Focus")

@@ -16,6 +16,7 @@ LineBreakCode = Literal[
     "after_separator",
     "before_rarity",
     "after_rarity",
+    "between_rare_name_base",
     "before_modifier_header",
     "after_modifier_header",
 ]

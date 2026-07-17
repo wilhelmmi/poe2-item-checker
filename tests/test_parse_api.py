@@ -73,9 +73,17 @@ async def test_real_single_line_input_is_preserved_and_warned(client: httpx.Asyn
 
 @pytest.mark.anyio
 async def test_collapsed_rare_is_always_ambiguous(client: httpx.AsyncClient) -> None:
-    raw = "Item Class: Rings Rarity: Rare Doom Circle Ruby Ring -------- Item Level: 66"
+    raw = "Item Class: Rings Rarity: Rare Doom -------- Item Level: 66"
     body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
     assert body["auto_format_status"] == "ambiguous"
+
+
+@pytest.mark.anyio
+async def test_collapsed_rare_with_two_word_name_and_base_is_safe(client: httpx.AsyncClient) -> None:
+    raw = "Item Class: Foci Rarity: Rare Empyrean Emblem Runed Focus -------- Item Level: 67"
+    body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
+    assert body["auto_format_status"] == "safe"
+    assert "Empyrean Emblem\n Runed Focus" in body["line_break_suggestion"]["suggested_text"]
 
 
 @pytest.mark.anyio

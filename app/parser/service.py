@@ -79,11 +79,13 @@ def parse_with_warnings(raw_text: str) -> ParseItemResponse:
     status = "unchanged"
     if collapsed:
         rarity_match = COLLAPSED_RARITY_RE.search(raw_text)
-        if rarity_match and rarity_match.group(1) in {"Rare", "Unique"}:
+        if rarity_match and rarity_match.group(1) == "Unique":
             status = "ambiguous"
-        elif suggestion and rarity_match and rarity_match.group(1) in {"Normal", "Magic"}:
+        elif suggestion and rarity_match and rarity_match.group(1) in {"Normal", "Magic", "Rare"}:
             reparsed = parse_with_warnings(suggestion.suggested_text)
             has_identity = all((reparsed.item.item_class, reparsed.item.rarity, reparsed.item.name))
+            if rarity_match.group(1) == "Rare":
+                has_identity = has_identity and bool(reparsed.item.base_type)
             has_blocker = any(w.code in BLOCKING_WARNING_CODES for w in reparsed.warnings)
             status = (
                 "safe"

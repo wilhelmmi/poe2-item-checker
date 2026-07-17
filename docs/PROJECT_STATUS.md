@@ -9,9 +9,12 @@ Stand: 2026-07-17 — API-only Pivot umgesetzt und validiert.
 - Kein lokaler fachlicher Score, Vergleich oder Empfehlungs-Fallback.
 - Kein Marktwert-/Trade-Check und noch kein Crafting-Check.
 - Lokales Parsing, Zielslot-Validierung und Profil-/Equipment-Persistenz bleiben aktiv.
-- Parser-zertifizierte Autoformatierung: `safe` nur für konservative insert-only
-  Normal-/Magic-Vorschläge mit erfolgreichem Identity-Reparse; Rare/Unique collapsed sind
-  immer `ambiguous`. Evaluate und Equipment-Save verwenden ausschließlich `safe` automatisch.
+- Parser-zertifizierte Autoformatierung arbeitet ausschließlich insert-only. Normal/Magic
+  sowie Rare-Items mit zweigliedrigem Namen und erkanntem Basistyp werden nach erfolgreichem
+  Identity-Reparse als `safe` eingestuft; kollabierte Unique- oder unvollständige Rare-Texte
+  bleiben `ambiguous`. Evaluate und Equipment-Save verwenden ausschließlich `safe` automatisch.
+- Das Slot-Eingabefeld formatiert vollständige Paste-Eingaben sofort sichtbar. Mehrdeutige
+  Texte werden nur soweit sicher möglich strukturiert und bleiben vor dem Speichern prüfbar.
 - Bulk-Imports bleiben verlustfrei und werden nicht stillschweigend autoformatiert.
 - Die UI führt vor Vergleichen ein Parse-Preflight aus, zeigt Autoformatierung samt exaktem
   Undo und stoppt mehrdeutige Eingaben vor dem Provider-Aufruf.
@@ -41,8 +44,8 @@ Produkts. Eine spätere Datenbereinigung braucht eine separate, bewusst freigege
 ## Validierung
 
 - Ruff: ohne Befund.
-- Backend: 142 Tests bestanden.
-- Frontend: 13 Vitest-Tests bestanden.
+- Backend: 144 Tests bestanden.
+- Frontend: 14 Vitest-Tests bestanden.
 - TypeScript-Prüfung und Vite-Produktionsbuild: erfolgreich.
 - Code-Review durchgeführt; alle hoch priorisierten Findings wurden behoben.
 
