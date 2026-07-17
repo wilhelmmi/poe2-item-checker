@@ -9,6 +9,12 @@ Stand: 2026-07-17 — API-only Pivot umgesetzt und validiert.
 - Kein lokaler fachlicher Score, Vergleich oder Empfehlungs-Fallback.
 - Kein Marktwert-/Trade-Check und noch kein Crafting-Check.
 - Lokales Parsing, Zielslot-Validierung und Profil-/Equipment-Persistenz bleiben aktiv.
+- Parser-zertifizierte Autoformatierung: `safe` nur für konservative insert-only
+  Normal-/Magic-Vorschläge mit erfolgreichem Identity-Reparse; Rare/Unique collapsed sind
+  immer `ambiguous`. Evaluate und Equipment-Save verwenden ausschließlich `safe` automatisch.
+- Bulk-Imports bleiben verlustfrei und werden nicht stillschweigend autoformatiert.
+- Die UI führt vor Vergleichen ein Parse-Preflight aus, zeigt Autoformatierung samt exaktem
+  Undo und stoppt mehrdeutige Eingaben vor dem Provider-Aufruf.
 - Provider erhält Candidate, exakt ausgerüstetes Zielslot-Item, Zielslot, beobachtetes Profil
   und den vollständigen versionierten Build-Kontext.
 - Ein leerer Zielslot wird vor dem Provideraufruf mit `equipped_item_required` abgewiesen.
@@ -32,8 +38,8 @@ Produkts. Eine spätere Datenbereinigung braucht eine separate, bewusst freigege
 ## Validierung
 
 - Ruff: ohne Befund.
-- Backend: 103 Tests bestanden.
-- Frontend: 11 Vitest-Tests bestanden.
+- Backend: 108 Tests bestanden.
+- Frontend: 13 Vitest-Tests bestanden.
 - TypeScript-Prüfung und Vite-Produktionsbuild: erfolgreich.
 - Code-Review durchgeführt; alle hoch priorisierten Findings wurden behoben.
 

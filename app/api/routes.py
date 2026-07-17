@@ -8,16 +8,31 @@ from app.builds.registry import BuildContext, get_build, list_builds
 from app.db.session import SessionLocal
 from app.db.models import CharacterProfile, EquipmentSlot, Item
 from app.equipment.service import (
-    SLOT_CLASSES, equipment_response, export_equipment, get_or_create_profile, import_equipment,
-    profile_schema, put_profile, replace_equipment,
+    SLOT_CLASSES,
+    equipment_response,
+    export_equipment,
+    get_or_create_profile,
+    import_equipment,
+    profile_schema,
+    put_profile,
+    replace_equipment,
 )
 
-from app.parser.service import parse_with_warnings
+from app.parser.service import (
+    BLOCKING_WARNING_CODES,
+    parse_with_safe_auto_format,
+    parse_with_warnings,
+)
 from app.schemas.health import HealthResponse
 from app.schemas.parsing import ParseItemRequest, ParseItemResponse
 from app.schemas.management import (
-    EquipmentExport, EquipmentImportData, EquipmentItem, EquipmentPut, EquipmentResponse,
-    ProfileData, Slot,
+    EquipmentExport,
+    EquipmentImportData,
+    EquipmentItem,
+    EquipmentPut,
+    EquipmentResponse,
+    ProfileData,
+    Slot,
 )
 
 router = APIRouter(prefix="/api")
@@ -59,7 +74,9 @@ async def get_equipment(db: Session = Depends(database)) -> EquipmentResponse:
 
 
 @router.put("/equipment/{slot}", response_model=EquipmentItem)
-async def put_equipment(slot: Slot, data: EquipmentPut, db: Session = Depends(database)) -> EquipmentItem:
+async def put_equipment(
+    slot: Slot, data: EquipmentPut, db: Session = Depends(database)
+) -> EquipmentItem:
     try:
         return replace_equipment(db, slot, data.raw_text)
     except ValueError as exc:
@@ -68,7 +85,9 @@ async def put_equipment(slot: Slot, data: EquipmentPut, db: Session = Depends(da
 
 
 @router.post("/equipment/import", response_model=EquipmentResponse)
-async def import_equipment_seed(data: EquipmentImportData, db: Session = Depends(database)) -> EquipmentResponse:
+async def import_equipment_seed(
+    data: EquipmentImportData, db: Session = Depends(database)
+) -> EquipmentResponse:
     try:
         return import_equipment(db, data)
     except ValueError as exc:
@@ -88,35 +107,58 @@ async def parse_item(request: ParseItemRequest) -> ParseItemResponse:
 
 @router.post("/items/evaluate", response_model=EvaluateItemResponse)
 async def evaluate_item(
-    request: EvaluateItemRequest, db: Session = Depends(database),
+    request: EvaluateItemRequest,
+    db: Session = Depends(database),
 ) -> EvaluateItemResponse:
-    parsed = parse_with_warnings(request.raw_text)
-    blocking_codes = {"input_missing_line_breaks", "missing_item_identity", "no_modifiers_detected"}
-    if any(warning.code in blocking_codes for warning in parsed.warnings):
+    preflight = parse_with_warnings(request.raw_text)
+    if preflight.auto_format_status == "ambiguous":
         raise HTTPException(
             status_code=422,
-            detail={"code": "incomplete_item", "message": "Der Itemtext ist nicht vollständig analysierbar."},
+            detail={
+                "code": "ambiguous_item_format",
+                "message": (
+                    "Der einzeilige Itemtext kann nicht sicher automatisch formatiert werden. "
+                    "Bitte Zeilenumbrüche prüfen und manuell ergänzen."
+                ),
+            },
+        )
+    parsed = parse_with_safe_auto_format(request.raw_text)
+    if any(warning.code in BLOCKING_WARNING_CODES for warning in parsed.warnings):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "incomplete_item",
+                "message": "Der Itemtext ist nicht vollständig analysierbar.",
+            },
         )
     if parsed.item.item_class != SLOT_CLASSES[request.target_slot]:
-        raise HTTPException(status_code=422, detail={
-            "code": "item_slot_mismatch",
-            "message": "Die Item Class passt nicht zum gewählten Zielslot.",
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "item_slot_mismatch",
+                "message": "Die Item Class passt nicht zum gewählten Zielslot.",
+            },
+        )
     try:
         build = get_build(request.build_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail={
-            "code": "unknown_build", "message": "Der gewählte Build ist nicht verfügbar."
-        }) from exc
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "unknown_build", "message": "Der gewählte Build ist nicht verfügbar."},
+        ) from exc
     from app.equipment.service import item_schema, profile_schema
+
     row = db.get(EquipmentSlot, (1, request.target_slot))
     equipped_orm = db.get(Item, row.item_id) if row and row.item_id else None
     equipped = item_schema(equipped_orm) if equipped_orm else None
     if equipped is None:
-        raise HTTPException(status_code=422, detail={
-            "code": "equipped_item_required",
-            "message": "Im gewählten Zielslot muss zuerst ein Item ausgerüstet werden.",
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "equipped_item_required",
+                "message": "Im gewählten Zielslot muss zuerst ein Item ausgerüstet werden.",
+            },
+        )
     profile = db.get(CharacterProfile, 1) if request.use_profile else None
     evaluation_input = EvaluationInput(
         candidate=parsed.item,
@@ -130,18 +172,32 @@ async def evaluate_item(
         evaluation = await provider.evaluate(evaluation_input)
     except EvaluationProviderError as exc:
         return EvaluateItemResponse(
-            parse=parsed, build=build, target_slot=request.target_slot, equipped=equipped,
+            parse=parsed,
+            build=build,
+            target_slot=request.target_slot,
+            equipped=equipped,
             evaluation=None,
-            provider=None, model=None, provider_status="unavailable",
+            provider=None,
+            model=None,
+            provider_status="unavailable",
             provider_error={"code": exc.code, "message": exc.public_message},
-            disclaimer=("API-Empfehlung nicht verfügbar. Es wurde keine lokale Empfehlung "
-                        "oder Ersatzbewertung erzeugt."),
+            disclaimer=(
+                "API-Empfehlung nicht verfügbar. Es wurde keine lokale Empfehlung "
+                "oder Ersatzbewertung erzeugt."
+            ),
         )
     return EvaluateItemResponse(
-        parse=parsed, build=build, target_slot=request.target_slot, equipped=equipped,
+        parse=parsed,
+        build=build,
+        target_slot=request.target_slot,
+        equipped=equipped,
         evaluation=evaluation,
-        provider=provider.name, model=provider.model, provider_status="success",
+        provider=provider.name,
+        model=provider.model,
+        provider_status="success",
         provider_error=None,
-        disclaimer=("API-gestützter Candidate-vs-Equipped-Vergleich. Keine Marktwert- oder "
-                    "Crafting-Bewertung."),
+        disclaimer=(
+            "API-gestützter Candidate-vs-Equipped-Vergleich. Keine Marktwert- oder "
+            "Crafting-Bewertung."
+        ),
     )

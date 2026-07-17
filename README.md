@@ -49,6 +49,13 @@ Ist der Zielslot leer, endet der Request vor dem Provideraufruf mit HTTP 422.
 Das strukturierte Ergebnis enthält ausschließlich `recommendation` (`better`,
 `not_better`, `uncertain`), `confidence`, `reasons` und `warnings`.
 
+Der Python-Parser kennzeichnet Eingaben mit `auto_format_status` als `unchanged`, `safe`
+oder `ambiguous`. Nur konservative, insert-only Vorschläge für einzeilige Normal-/Magic-
+Items werden nach erfolgreichem Identitäts-Reparse automatisch angewendet. Einzeilige
+Rare-/Unique-Items bleiben immer `ambiguous` und müssen manuell geprüft werden. Die UI zeigt
+eine sichere Änderung mit Undo auf den exakten Originaltext; mehrdeutige Vorschläge werden
+nie automatisch an den Provider gesendet oder als Equipment gespeichert.
+
 `GET /api/builds` liefert die auswählbaren Build-Versionen. Profil- und Equipment-Endpunkte
 bleiben bestehen. Alte History-/Sale-Daten und Datenbankfelder werden aus
 Kompatibilitätsgründen nicht destruktiv migriert, gehören aber nicht mehr zum aktiven UI-

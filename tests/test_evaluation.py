@@ -26,17 +26,18 @@ def result() -> EvaluationResult:
     )
 
 
-@pytest.mark.parametrize("claim", [
-    "12 % mehr DPS.",
-    "Der Score steigt.",
-    "Marktwert: ein Divine.",
-    "Das Item sollte gecraftet werden.",
-])
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "12 % mehr DPS.",
+        "Der Score steigt.",
+        "Marktwert: ein Divine.",
+        "Das Item sollte gecraftet werden.",
+    ],
+)
 def test_result_rejects_out_of_scope_claims(claim: str) -> None:
     with pytest.raises(ValidationError):
-        EvaluationResult(
-            recommendation="better", confidence="high", reasons=[claim], warnings=[]
-        )
+        EvaluationResult(recommendation="better", confidence="high", reasons=[claim], warnings=[])
 
 
 def test_result_allows_essence_drain_reason() -> None:
@@ -120,7 +121,8 @@ async def test_evaluate_sends_complete_comparison_context(
 
 @pytest.mark.anyio
 async def test_provider_failure_has_no_local_recommendation(
-    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_db: sessionmaker[Session],
 ) -> None:
     monkeypatch.setattr(routes, "get_evaluation_provider", lambda: FailingProvider())
     raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
@@ -182,22 +184,36 @@ async def test_provider_keeps_only_bounded_unknown_modifier_text() -> None:
     from app.parser.service import parse_with_warnings
 
     item = parse_with_warnings((ROOT / "tests/fixtures/rare_wand.txt").read_text()).item
-    unknown_modifier = item.modifiers[0].model_copy(update={
-        "normalized_key": "unknown", "raw_text": "UNKNOWN_EFFECT_MARKER" + "x" * 600,
-    })
-    unknown = item.model_copy(update={
-        "modifiers": [unknown_modifier, *item.modifiers[1:]],
-    })
+    unknown_modifier = item.modifiers[0].model_copy(
+        update={
+            "normalized_key": "unknown",
+            "raw_text": "UNKNOWN_EFFECT_MARKER" + "x" * 600,
+        }
+    )
+    unknown = item.model_copy(
+        update={
+            "modifiers": [unknown_modifier, *item.modifiers[1:]],
+        }
+    )
     data = EvaluationInput(
-        candidate=unknown, equipped=item, target_slot="wand",
-        observed_profile=None, build=get_build(DEFAULT_BUILD_ID),
+        candidate=unknown,
+        equipped=item,
+        target_slot="wand",
+        observed_profile=None,
+        build=get_build(DEFAULT_BUILD_ID),
     )
     parse = pytest.importorskip("unittest.mock").AsyncMock(
         return_value=SimpleNamespace(output_parsed=result(), output=[], usage=None)
     )
     provider = OpenAIEvaluationProvider(
-        api_key="x", model="mock", reasoning_effort="medium", timeout=1, max_retries=0,
-        max_input_chars=50_000, max_output_tokens=100, rate_limit_per_minute=2,
+        api_key="x",
+        model="mock",
+        reasoning_effort="medium",
+        timeout=1,
+        max_retries=0,
+        max_input_chars=50_000,
+        max_output_tokens=100,
+        rate_limit_per_minute=2,
         client=SimpleNamespace(responses=SimpleNamespace(parse=parse)),
     )
     await provider.evaluate(data)
@@ -221,6 +237,52 @@ async def test_target_slot_and_build_are_required_and_valid() -> None:
         builds = await client.get("/api/builds")
     assert response.status_code == 422
     assert builds.json()[0]["build_id"] == "deadrabb1t-chaos-dot-lich-starter-v1"
+
+
+@pytest.mark.anyio
+async def test_safe_collapsed_magic_is_formatted_before_provider(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = FakeProvider()
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    equipped = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
+    with isolated_db() as db:
+        replace_equipment(db, "wand", equipped)
+    collapsed = (
+        "Item Class: Wands Rarity: Magic Apt Attuned Wand -------- Item Level: 66 "
+        "-------- { Prefix Modifier — Caster } +2 to Level of all Chaos Spell Skills"
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": collapsed, "target_slot": "wand"}
+        )
+    assert response.status_code == 200
+    assert provider.received is not None
+    assert "\n" in provider.received.candidate.raw_text
+    assert provider.received.candidate.raw_text == response.json()["parse"]["item"]["raw_text"]
+
+
+@pytest.mark.anyio
+async def test_ambiguous_rare_never_calls_provider(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = FakeProvider()
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    equipped = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
+    with isolated_db() as db:
+        replace_equipment(db, "wand", equipped)
+    collapsed = equipped.replace("\n", " ")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": collapsed, "target_slot": "wand"}
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "ambiguous_item_format"
+    assert provider.received is None
 
 
 @pytest.mark.anyio

@@ -30,4 +30,25 @@ describe('API-only comparison', () => {
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response(evaluation)))
     render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'})); await screen.findByText('Candidate ist besser'); fireEvent.change(screen.getByLabelText('Equipment-Slot'),{target:{value:'boots'}}); await waitFor(()=>expect(screen.queryByText('Candidate ist besser')).toBeNull())
   })
+  it('autoformats safe input, evaluates formatted text, and restores exact original on undo', async () => {
+    const original='Item Class: Wands Rarity: Magic Apt Wand'
+    const formatted='Item Class: Wands\nRarity: Magic\nApt Wand'
+    const safe={item:{...parsedItem,raw_text:original},warnings:[],line_break_suggestion:{suggested_text:formatted,insertions:[]},auto_format_status:'safe'}
+    const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(safe):response({...evaluation,parse:{...evaluation.parse,item:{...parsedItem,raw_text:formatted}}}))
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
+    const textarea=screen.getByLabelText('Englischen Itemtext einfügen') as HTMLTextAreaElement
+    fireEvent.change(textarea,{target:{value:original}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
+    expect(await screen.findByText(/Sichere Zeilenumbrüche/)).toBeTruthy();expect(textarea.value).toBe(formatted)
+    const evaluateCall=fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')
+    expect(JSON.parse(evaluateCall![1]!.body as string).raw_text).toBe(formatted)
+    fireEvent.click(screen.getByRole('button',{name:'Formatierung rückgängig machen'}));expect(textarea.value).toBe(original);expect(screen.queryByText('Candidate ist besser')).toBeNull()
+  })
+  it('does not evaluate ambiguous input and exposes an editable proposal', async () => {
+    const ambiguous={item:parsedItem,warnings:[],line_break_suggestion:{suggested_text:'manual\nproposal',insertions:[]},auto_format_status:'ambiguous'}
+    const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response(ambiguous))
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'rare collapsed'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
+    expect(await screen.findByText(/mehrdeutig/)).toBeTruthy();expect(screen.getByLabelText('Manueller Formatierungsvorschlag')).toBeTruthy()
+    expect(fetchMock.mock.calls.some(call=>call[0]==='/api/items/evaluate')).toBe(false)
+  })
 })
