@@ -47,6 +47,7 @@ export type ParseResponse = {
   item: ParsedItem
   warnings: ParseWarning[]
   line_break_suggestion: LineBreakSuggestion | null
+  auto_format_status: 'unchanged' | 'safe' | 'ambiguous'
 }
 export type BuildContext = { build_id: string; version: number; name: string; author: string; source_url: string; source_variant: string; archetype: string; core_skills: string[]; offensive_priorities: string[]; defensive_priorities: string[]; constraints: string[] }
 export type EvaluationResult = { recommendation: 'better' | 'not_better' | 'uncertain'; confidence: 'low' | 'medium' | 'high'; reasons: string[]; warnings: string[] }
@@ -90,15 +91,15 @@ export async function loadBuilds(): Promise<BuildContext[]> { const response = a
 
 export async function loadProfile(): Promise<Profile> { const response = await fetch('/api/profile'); if (!response.ok) throw new Error('Profil konnte nicht geladen werden.'); return response.json() as Promise<Profile> }
 export async function saveProfile(profile: Profile): Promise<Profile> { const response = await fetch('/api/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) }); if (!response.ok) throw new Error('Profil konnte nicht gespeichert werden.'); return response.json() as Promise<Profile> }
-export async function loadEquipment(): Promise<Equipment> { const response = await fetch('/api/equipment'); if (!response.ok) throw new Error('Equipment konnte nicht geladen werden.'); return response.json() as Promise<Equipment> }
-export async function saveEquipment(slot: string, raw_text: string): Promise<void> { const response = await fetch(`/api/equipment/${slot}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text }) }); if (!response.ok) throw new Error('Equipment konnte nicht gespeichert werden.') }
+export async function loadEquipment(signal?: AbortSignal): Promise<Equipment> { const response = await fetch('/api/equipment',{signal}); if (!response.ok) throw new Error('Equipment konnte nicht geladen werden.'); return response.json() as Promise<Equipment> }
+export async function saveEquipment(slot: string, raw_text: string, signal?: AbortSignal): Promise<{ id: string; item: ParsedItem }> { const response = await fetch(`/api/equipment/${slot}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text }), signal }); if (!response.ok) { const body = await response.json().catch(() => null) as { detail?: { code?: string } } | null; throw new Error(body?.detail?.code === 'ambiguous_item_format' ? 'Der Itemtext ist mehrdeutig und muss manuell formatiert werden.' : 'Equipment konnte nicht gespeichert werden.') } return response.json() as Promise<{ id: string; item: ParsedItem }> }
 
 async function managementError(response: Response, fallback: string): Promise<Error> {
   const body = await response.json().catch(() => null) as { detail?: { code?: string } } | null
   return new Error(body?.detail?.code ? `${fallback} (${body.detail.code}).` : `${fallback} (${response.status}).`)
 }
 
-export async function importEquipmentFile(file: File): Promise<Equipment> {
+export async function importEquipmentFile(file: File, signal?: AbortSignal): Promise<Equipment> {
   if (file.size > 2_000_000) throw new Error('Die Importdatei ist größer als 2 MB.')
   let data: unknown
   try { data = JSON.parse(await file.text()) } catch { throw new Error('Die Importdatei enthält kein gültiges JSON.') }
@@ -106,7 +107,7 @@ export async function importEquipmentFile(file: File): Promise<Equipment> {
     throw new Error('Nur Equipment-Dateien mit schema_version 1 oder 2 werden unterstützt.')
   }
   const response = await fetch('/api/equipment/import', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal,
   })
   if (!response.ok) throw await managementError(response, 'Import fehlgeschlagen')
   return response.json() as Promise<Equipment>

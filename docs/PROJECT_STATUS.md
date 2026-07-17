@@ -9,12 +9,30 @@ Stand: 2026-07-17 — API-only Pivot umgesetzt und validiert.
 - Kein lokaler fachlicher Score, Vergleich oder Empfehlungs-Fallback.
 - Kein Marktwert-/Trade-Check und noch kein Crafting-Check.
 - Lokales Parsing, Zielslot-Validierung und Profil-/Equipment-Persistenz bleiben aktiv.
+- Parser-zertifizierte Autoformatierung arbeitet ausschließlich insert-only. Normal/Magic
+  sowie Rare-Items mit zweigliedrigem Namen und erkanntem Basistyp werden nach erfolgreichem
+  Identity-Reparse als `safe` eingestuft; kollabierte Unique- oder unvollständige Rare-Texte
+  bleiben `ambiguous`. Evaluate und Equipment-Save verwenden ausschließlich `safe` automatisch.
+- Das Slot-Eingabefeld formatiert vollständige Paste-Eingaben sofort sichtbar. Mehrdeutige
+  Texte werden nur soweit sicher möglich strukturiert und bleiben vor dem Speichern prüfbar.
+- Bulk-Imports bleiben verlustfrei und werden nicht stillschweigend autoformatiert.
+- Der vollständige v1/v2-Equipmentimport aktualisiert nach Erfolg den aktuell gewählten
+  Slot-Editor und meldet die Anzahl belegter Slots; einzelne Slots müssen nicht nachgespeichert
+  werden.
+- Nach einer erfolgreichen API-Empfehlung kann der Candidate explizit ausgerüstet werden.
+  Dabei wird exakt der verglichene Zielslot atomar ersetzt und die alte Vergleichsaussage
+  unmittelbar invalidiert. Das vorherige Item bleibt nur intern nicht-destruktiv erhalten.
+- Die UI führt vor Vergleichen ein Parse-Preflight aus, zeigt Autoformatierung samt exaktem
+  Undo und stoppt mehrdeutige Eingaben vor dem Provider-Aufruf.
 - Provider erhält Candidate, exakt ausgerüstetes Zielslot-Item, Zielslot, beobachtetes Profil
   und den vollständigen versionierten Build-Kontext.
 - Ein leerer Zielslot wird vor dem Provideraufruf mit `equipped_item_required` abgewiesen.
 - Item-Rohtext, unbekannte Rohzeilen, Modifier-Rohtext sowie Profilname und -notizen werden
-  nicht an den Provider übertragen. Freitext-Ausgaben mit Marktwert-, Crafting-, Score- oder
-  Prozentbehauptungen werden zusätzlich schema-seitig verworfen.
+  nicht an den Provider übertragen. Beobachtete Prozent-Modifier, sachliche Trade-offs und
+  die Tatsache eines crafted Modifiers sind in Gründen erlaubt. Unbelegte relative
+  Leistungsprozente, Markt-/Preis-/Sale-Aussagen und Crafting-Handlungen oder -Empfehlungen
+  werden schema-seitig verworfen. ValidationError-Logs enthalten nur Phase, Fehleranzahl,
+  Typ/Ort und interne Rulecodes, nie Freitext, Input oder Validation-Context.
 
 ## Build-Registry
 
@@ -32,8 +50,8 @@ Produkts. Eine spätere Datenbereinigung braucht eine separate, bewusst freigege
 ## Validierung
 
 - Ruff: ohne Befund.
-- Backend: 103 Tests bestanden.
-- Frontend: 11 Vitest-Tests bestanden.
+- Backend: 144 Tests bestanden.
+- Frontend: 17 Vitest-Tests bestanden.
 - TypeScript-Prüfung und Vite-Produktionsbuild: erfolgreich.
 - Code-Review durchgeführt; alle hoch priorisierten Findings wurden behoben.
 

@@ -7,9 +7,12 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+import app.api.routes as routes
 from app.api.routes import database
 from app.db.models import Base, Item
 from app.db.session import enable_sqlite_foreign_keys
+from app.equipment.service import parse_equipment
+from app.evaluation.provider import EvaluationProviderError
 from app.main import app
 
 ROOT = Path(__file__).parents[1]
@@ -129,6 +132,10 @@ async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> N
 
 @pytest.mark.anyio
 async def test_evaluate_flow_has_no_local_hard_checks(isolated_db, monkeypatch) -> None:
+    def unavailable_provider():
+        raise EvaluationProviderError("provider_not_configured", "Nicht konfiguriert.")
+
+    monkeypatch.setattr(routes, "get_evaluation_provider", unavailable_provider)
     seed = json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -164,3 +171,30 @@ async def test_evaluate_flow_has_no_local_hard_checks(isolated_db, monkeypatch) 
         assert mismatch.json()["detail"]["code"] == "item_slot_mismatch"
         no_target = await client.post("/api/items/evaluate", json={"raw_text": candidate})
         assert no_target.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_equipment_save_autoformats_only_safe_collapsed_input(isolated_db) -> None:
+    safe = (
+        "Item Class: Wands Rarity: Magic Apt Attuned Wand -------- Item Level: 66 "
+        "-------- { Prefix Modifier — Caster } +2 to Level of all Chaos Spell Skills"
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        saved = await client.put("/api/equipment/wand", json={"raw_text": safe})
+        assert saved.status_code == 200
+        assert "\n" in saved.json()["item"]["raw_text"]
+        rare = safe.replace("Rarity: Magic", "Rarity: Rare").replace("Apt Attuned", "Doom")
+        rejected = await client.put("/api/equipment/wand", json={"raw_text": rare})
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"]["code"] == "ambiguous_item_format"
+
+
+def test_bulk_import_parser_never_silently_autoformats_collapsed_input() -> None:
+    collapsed = (
+        "Item Class: Wands Rarity: Magic Apt Attuned Wand -------- Item Level: 66 "
+        "-------- { Prefix Modifier — Caster } +2 to Level of all Chaos Spell Skills"
+    )
+    with pytest.raises(ValueError, match="incomplete_item"):
+        parse_equipment(collapsed)

@@ -16,6 +16,7 @@ LineBreakCode = Literal[
     "after_separator",
     "before_rarity",
     "after_rarity",
+    "between_rare_name_base",
     "before_modifier_header",
     "after_modifier_header",
 ]
@@ -42,7 +43,9 @@ class ParseWarning(BaseModel):
 
 class LineBreakInsertion(BaseModel):
     model_config = ConfigDict(frozen=True)
-    offset: int = Field(description="Nullbasierter Einfügeoffset relativ zum unveränderten Originaltext.")
+    offset: int = Field(
+        description="Nullbasierter Einfügeoffset relativ zum unveränderten Originaltext."
+    )
     code: LineBreakCode
     message: str
 
@@ -57,3 +60,4 @@ class ParseItemResponse(BaseModel):
     item: ParsedItem
     warnings: list[ParseWarning]
     line_break_suggestion: LineBreakSuggestion | None = None
+    auto_format_status: Literal["unchanged", "safe", "ambiguous"] = "unchanged"

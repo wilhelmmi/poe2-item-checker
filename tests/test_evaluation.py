@@ -26,24 +26,63 @@ def result() -> EvaluationResult:
     )
 
 
-@pytest.mark.parametrize("claim", [
-    "12 % mehr DPS.",
-    "Der Score steigt.",
-    "Marktwert: ein Divine.",
-    "Das Item sollte gecraftet werden.",
-])
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "12 % mehr DPS.",
+        "15% stärker als das ausgerüstete Item.",
+        "15% better than equipped.",
+        "DPS improves by twelve percent.",
+        "The gain is 15 percent compared with equipped.",
+        "The gain is 15 percent.",
+        "15% performance improvement.",
+        "Der Score steigt.",
+        "Marktwert: ein Divine.",
+        "Trade value is one Divine.",
+        "Market value is high.",
+        "Sell this item.",
+        "Vendor it.",
+        "Das Item sollte verkauft werden.",
+        "Das Item sollte gecraftet werden.",
+        "Den Modifier neu craften.",
+        "The item should be crafted.",
+        "This can be crafted further.",
+        "Get this crafted.",
+        "Add a crafted modifier.",
+        "Use a crafted modifier.",
+        "The crafted modifier should be removed.",
+        "The item has a crafted modifier; remove it.",
+        "Use an Essence.",
+        "Apply an Omen.",
+        "Annul the suffix.",
+        "Socket a rune.",
+    ],
+)
 def test_result_rejects_out_of_scope_claims(claim: str) -> None:
     with pytest.raises(ValidationError):
-        EvaluationResult(
-            recommendation="better", confidence="high", reasons=[claim], warnings=[]
-        )
+        EvaluationResult(recommendation="better", confidence="high", reasons=[claim], warnings=[])
 
 
-def test_result_allows_essence_drain_reason() -> None:
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Essenzentzug profitiert von Chaos-Skill-Leveln.",
+        "Das Item hat 26% increased Cast Speed.",
+        "The item has 15% more Chaos Damage.",
+        "The item has 10% less damage taken.",
+        "Der Ring liefert 30% Lightning Resistance.",
+        "Der Modifier gibt 20% chance for ES Recharge.",
+        "Trade-off: mehr Energy Shield, aber keine Mana-Regeneration.",
+        "The item has a crafted modifier granting Cast Speed.",
+        "Der gecraftete Modifier gewährt Cast Speed.",
+        "The suffix is crafted.",
+    ],
+)
+def test_result_allows_observed_facts_and_tradeoffs(claim: str) -> None:
     value = EvaluationResult(
         recommendation="better",
         confidence="high",
-        reasons=["Essenzentzug profitiert von Chaos-Skill-Leveln."],
+        reasons=[claim],
         warnings=[],
     )
     assert value.recommendation == "better"
@@ -120,7 +159,8 @@ async def test_evaluate_sends_complete_comparison_context(
 
 @pytest.mark.anyio
 async def test_provider_failure_has_no_local_recommendation(
-    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_db: sessionmaker[Session],
 ) -> None:
     monkeypatch.setattr(routes, "get_evaluation_provider", lambda: FailingProvider())
     raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
@@ -182,22 +222,36 @@ async def test_provider_keeps_only_bounded_unknown_modifier_text() -> None:
     from app.parser.service import parse_with_warnings
 
     item = parse_with_warnings((ROOT / "tests/fixtures/rare_wand.txt").read_text()).item
-    unknown_modifier = item.modifiers[0].model_copy(update={
-        "normalized_key": "unknown", "raw_text": "UNKNOWN_EFFECT_MARKER" + "x" * 600,
-    })
-    unknown = item.model_copy(update={
-        "modifiers": [unknown_modifier, *item.modifiers[1:]],
-    })
+    unknown_modifier = item.modifiers[0].model_copy(
+        update={
+            "normalized_key": "unknown",
+            "raw_text": "UNKNOWN_EFFECT_MARKER" + "x" * 600,
+        }
+    )
+    unknown = item.model_copy(
+        update={
+            "modifiers": [unknown_modifier, *item.modifiers[1:]],
+        }
+    )
     data = EvaluationInput(
-        candidate=unknown, equipped=item, target_slot="wand",
-        observed_profile=None, build=get_build(DEFAULT_BUILD_ID),
+        candidate=unknown,
+        equipped=item,
+        target_slot="wand",
+        observed_profile=None,
+        build=get_build(DEFAULT_BUILD_ID),
     )
     parse = pytest.importorskip("unittest.mock").AsyncMock(
         return_value=SimpleNamespace(output_parsed=result(), output=[], usage=None)
     )
     provider = OpenAIEvaluationProvider(
-        api_key="x", model="mock", reasoning_effort="medium", timeout=1, max_retries=0,
-        max_input_chars=50_000, max_output_tokens=100, rate_limit_per_minute=2,
+        api_key="x",
+        model="mock",
+        reasoning_effort="medium",
+        timeout=1,
+        max_retries=0,
+        max_input_chars=50_000,
+        max_output_tokens=100,
+        rate_limit_per_minute=2,
         client=SimpleNamespace(responses=SimpleNamespace(parse=parse)),
     )
     await provider.evaluate(data)
@@ -205,6 +259,71 @@ async def test_provider_keeps_only_bounded_unknown_modifier_text() -> None:
     assert "UNKNOWN_EFFECT_MARKER" in content
     assert "x" * 501 not in content
     assert content.count('"raw_text"') == 1
+
+
+@pytest.mark.anyio
+async def test_sdk_validation_error_is_normalized_without_log_leakage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from app.builds.registry import DEFAULT_BUILD_ID, get_build
+    from app.parser.service import parse_with_warnings
+
+    marker = "SECRET_VALIDATION_INPUT_MARKER"
+    try:
+        EvaluationResult.model_validate(
+            {
+                "recommendation": "better",
+                "confidence": "high",
+                "reasons": [f"{marker}: 12% mehr DPS"],
+                "warnings": [],
+            }
+        )
+    except ValidationError as validation_error:
+        sdk_error = validation_error
+    item = parse_with_warnings((ROOT / "tests/fixtures/rare_wand.txt").read_text()).item
+    data = EvaluationInput(
+        candidate=item,
+        equipped=item,
+        target_slot="wand",
+        observed_profile=None,
+        build=get_build(DEFAULT_BUILD_ID),
+    )
+    parse = pytest.importorskip("unittest.mock").AsyncMock(side_effect=sdk_error)
+    provider = OpenAIEvaluationProvider(
+        api_key="SECRET_API_KEY_MARKER",
+        model="mock",
+        reasoning_effort="medium",
+        timeout=1,
+        max_retries=0,
+        max_input_chars=50_000,
+        max_output_tokens=100,
+        rate_limit_per_minute=2,
+        client=SimpleNamespace(responses=SimpleNamespace(parse=parse)),
+    )
+    with caplog.at_level("WARNING"):
+        with pytest.raises(EvaluationProviderError, match="invalid_provider_response"):
+            await provider.evaluate(data)
+    assert "phase=sdk_parse" in caplog.text
+    assert "error_count=1" in caplog.text
+    assert "evaluation_claim_relative_performance" in caplog.text
+    assert marker not in caplog.text
+    assert "SECRET_API_KEY_MARKER" not in caplog.text
+    assert "12%" not in caplog.text
+
+
+def test_validation_log_redacts_unknown_field_names(caplog: pytest.LogCaptureFixture) -> None:
+    from app.evaluation.openai_provider import _log_validation_error
+
+    marker = "SECRET_FIELD_NAME_MARKER"
+    with pytest.raises(ValidationError) as captured:
+        EvaluationResult.model_validate({
+            "recommendation": "better", "confidence": "high",
+            "reasons": ["Observed item fact."], "warnings": [], marker: "value",
+        })
+    with caplog.at_level("WARNING"):
+        _log_validation_error("sdk_parse", captured.value)
+    assert marker not in caplog.text
+    assert "<redacted>" in caplog.text
 
 
 @pytest.mark.anyio
@@ -221,6 +340,52 @@ async def test_target_slot_and_build_are_required_and_valid() -> None:
         builds = await client.get("/api/builds")
     assert response.status_code == 422
     assert builds.json()[0]["build_id"] == "deadrabb1t-chaos-dot-lich-starter-v1"
+
+
+@pytest.mark.anyio
+async def test_safe_collapsed_magic_is_formatted_before_provider(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = FakeProvider()
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    equipped = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
+    with isolated_db() as db:
+        replace_equipment(db, "wand", equipped)
+    collapsed = (
+        "Item Class: Wands Rarity: Magic Apt Attuned Wand -------- Item Level: 66 "
+        "-------- { Prefix Modifier — Caster } +2 to Level of all Chaos Spell Skills"
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": collapsed, "target_slot": "wand"}
+        )
+    assert response.status_code == 200
+    assert provider.received is not None
+    assert "\n" in provider.received.candidate.raw_text
+    assert provider.received.candidate.raw_text == response.json()["parse"]["item"]["raw_text"]
+
+
+@pytest.mark.anyio
+async def test_ambiguous_rare_never_calls_provider(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = FakeProvider()
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    equipped = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
+    with isolated_db() as db:
+        replace_equipment(db, "wand", equipped)
+    collapsed = equipped.replace("\n", " ")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": collapsed, "target_slot": "wand"}
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "ambiguous_item_format"
+    assert provider.received is None
 
 
 @pytest.mark.anyio

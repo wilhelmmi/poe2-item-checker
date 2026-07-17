@@ -16,6 +16,7 @@ MESSAGES = {
     "after_separator": "Zeilenumbruch nach einem exakten Trennmarker eingefügt.",
     "before_rarity": "Zeilenumbruch zwischen Item Class und Rarity eingefügt.",
     "after_rarity": "Zeilenumbruch nach der kanonischen Rarity eingefügt.",
+    "between_rare_name_base": "Zeilenumbruch zwischen Rare-Name und Basistyp eingefügt.",
     "before_modifier_header": "Zeilenumbruch vor einem vollständigen Modifierheader eingefügt.",
     "after_modifier_header": "Zeilenumbruch nach einem vollständigen Modifierheader eingefügt.",
 }
@@ -39,6 +40,16 @@ def suggest_line_breaks(raw_text: str) -> LineBreakSuggestion | None:
         add(match.end(), "after_separator")
     add(export_header.start("rarity_label"), "before_rarity")
     add(export_header.end("rarity"), "after_rarity")
+    if export_header.group("rarity") == "Rare":
+        first_separator = next(SEPARATOR_RE.finditer(raw_text), None)
+        identity_end = first_separator.start() if first_separator else len(raw_text)
+        identity = raw_text[export_header.end("rarity"):identity_end]
+        identity_tokens = list(re.finditer(r"\S+", identity))
+        if len(identity_tokens) >= 3:
+            add(
+                export_header.end("rarity") + identity_tokens[1].end(),
+                "between_rare_name_base",
+            )
     for match in BRACED_RE.finditer(raw_text):
         if parse_modifier_header(match.group(0)) is not None:
             add(match.start(), "before_modifier_header")

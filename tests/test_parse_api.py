@@ -56,19 +56,40 @@ async def test_real_single_line_input_is_preserved_and_warned(client: httpx.Asyn
     assert body["item"]["unknown_lines"] == raw.splitlines()
     codes = {warning["code"] for warning in body["warnings"]}
     assert {"input_missing_line_breaks", "missing_item_identity", "no_modifiers_detected"} <= codes
-    missing_breaks = next(warning for warning in body["warnings"] if warning["code"] == "input_missing_line_breaks")
+    missing_breaks = next(
+        warning for warning in body["warnings"] if warning["code"] == "input_missing_line_breaks"
+    )
     assert missing_breaks["lines"] == []
     assert missing_breaks["raw_lines"] == []
     suggestion = body["line_break_suggestion"]
     assert suggestion is not None
+    assert body["auto_format_status"] == "safe"
     repost = await client.post("/api/items/parse", json={"raw_text": suggestion["suggested_text"]})
     repost_codes = {warning["code"] for warning in repost.json()["warnings"]}
     assert "input_missing_line_breaks" not in repost_codes
     assert repost.json()["item"]["raw_text"] == suggestion["suggested_text"]
+    assert repost.json()["auto_format_status"] == "unchanged"
 
 
 @pytest.mark.anyio
-async def test_blank_input_is_rejected_without_trimming_valid_input(client: httpx.AsyncClient) -> None:
+async def test_collapsed_rare_is_always_ambiguous(client: httpx.AsyncClient) -> None:
+    raw = "Item Class: Rings Rarity: Rare Doom -------- Item Level: 66"
+    body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
+    assert body["auto_format_status"] == "ambiguous"
+
+
+@pytest.mark.anyio
+async def test_collapsed_rare_with_two_word_name_and_base_is_safe(client: httpx.AsyncClient) -> None:
+    raw = "Item Class: Foci Rarity: Rare Empyrean Emblem Runed Focus -------- Item Level: 67"
+    body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
+    assert body["auto_format_status"] == "safe"
+    assert "Empyrean Emblem\n Runed Focus" in body["line_break_suggestion"]["suggested_text"]
+
+
+@pytest.mark.anyio
+async def test_blank_input_is_rejected_without_trimming_valid_input(
+    client: httpx.AsyncClient,
+) -> None:
     assert (await client.post("/api/items/parse", json={"raw_text": ""})).status_code == 422
     assert (await client.post("/api/items/parse", json={"raw_text": "  \n "})).status_code == 422
     raw = "  Item Class: Rings\nRarity: Normal\nIron Ring  "
@@ -86,7 +107,9 @@ async def test_parse_service_and_endpoint_are_idempotent(client: httpx.AsyncClie
 
 
 @pytest.mark.anyio
-async def test_malformed_input_returns_warnings_and_unknown_api_stays_404(client: httpx.AsyncClient) -> None:
+async def test_malformed_input_returns_warnings_and_unknown_api_stays_404(
+    client: httpx.AsyncClient,
+) -> None:
     response = await client.post("/api/items/parse", json={"raw_text": "mystery"})
     assert response.status_code == 200
     codes = {warning["code"] for warning in response.json()["warnings"]}
@@ -98,6 +121,8 @@ async def test_malformed_input_returns_warnings_and_unknown_api_stays_404(client
 async def test_unknown_warning_reports_original_line_numbers(client: httpx.AsyncClient) -> None:
     raw = "Item Class: Rings\nRarity: Rare\nDoom Circle\nRuby Ring\n--------\nMystery line"
     body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
-    warning = next(warning for warning in body["warnings"] if warning["code"] == "unknown_lines_preserved")
+    warning = next(
+        warning for warning in body["warnings"] if warning["code"] == "unknown_lines_preserved"
+    )
     assert warning["lines"] == [6]
     assert warning["raw_lines"] == ["Mystery line"]
