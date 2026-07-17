@@ -16,9 +16,8 @@ Stand: 2026-07-17 — API-only Pivot umgesetzt und validiert.
 - Das Slot-Eingabefeld formatiert vollständige Paste-Eingaben sofort sichtbar. Mehrdeutige
   Texte werden nur soweit sicher möglich strukturiert und bleiben vor dem Speichern prüfbar.
 - Bulk-Imports bleiben verlustfrei und werden nicht stillschweigend autoformatiert.
-- Der vollständige v1/v2-Equipmentimport aktualisiert nach Erfolg den aktuell gewählten
-  Slot-Editor und meldet die Anzahl belegter Slots; einzelne Slots müssen nicht nachgespeichert
-  werden.
+- Der vollständige v1/v2-Equipmentimport ist implementiert, funktioniert im realen GUI-
+  Smoketest aber noch nicht zuverlässig und gilt deshalb noch nicht als abgenommen.
 - Nach einer erfolgreichen API-Empfehlung kann der Candidate explizit ausgerüstet werden.
   Dabei wird exakt der verglichene Zielslot atomar ersetzt und die alte Vergleichsaussage
   unmittelbar invalidiert. Das vorherige Item bleibt nur intern nicht-destruktiv erhalten.
@@ -55,10 +54,26 @@ Produkts. Eine spätere Datenbereinigung braucht eine separate, bewusst freigege
 - TypeScript-Prüfung und Vite-Produktionsbuild: erfolgreich.
 - Code-Review durchgeführt; alle hoch priorisierten Findings wurden behoben.
 
+## Bekannter Blocker: Equipmentimport
+
+Reproduziert im GUI-Smoketest am 2026-07-17:
+
+1. Über „Equipment importieren“ wird ein vollständiger JSON-Snapshot ausgewählt.
+2. In der GUI ist anschließend keine erkennbare Übernahme des Equipments sichtbar.
+3. Beim Candidate-Vergleich antwortet das Backend mit
+   `Im gewählten Zielslot muss zuerst ein Item ausgerüstet werden.`
+
+Damit ist trotz ausgewählter Importdatei der Zielslot serverseitig offenbar leer. In der
+nächsten Session zuerst Browser-Netzwerkantwort und Payload von `POST /api/equipment/import`,
+das erwartete JSON-Schema sowie anschließend `GET /api/equipment` und die verwendete
+Backend-Datenbank/Instanz prüfen. Den Import erst nach einem realen Ende-zu-Ende-Test mit
+vollständiger Datei und erfolgreichem Candidate-Vergleich als funktionsfähig markieren.
+
 ## Nächster Meilenstein
 
-1. Candidate-vs-Equipped mit echten API-Antworten und realen Equipment-Snapshots stabilisieren.
-2. Zusätzliche Builds als neue Registry-Versionen aufnehmen.
-3. Danach separaten API-basierten Crafting-Check entwickeln (Lohnt sich Crafting?).
+1. Den bekannten GUI-Equipmentimport-Blocker reproduzieren und beheben.
+2. Candidate-vs-Equipped mit echten API-Antworten und realen Equipment-Snapshots stabilisieren.
+3. Zusätzliche Builds als neue Registry-Versionen aufnehmen.
+4. Danach separaten API-basierten Crafting-Check entwickeln (Lohnt sich Crafting?).
 
 Ein Marktwert-Check ist explizit nicht geplant.
