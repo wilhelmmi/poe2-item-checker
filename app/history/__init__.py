@@ -1,0 +1,1 @@
+"""Persistent local comparison history."""

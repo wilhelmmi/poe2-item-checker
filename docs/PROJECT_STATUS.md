@@ -81,6 +81,21 @@ behaupten. Oberfläche und Erklärungen bleiben deutsch; PoE-Bezeichnungen bleib
   Caps, Spirit und Movement-Speed-Verlust aus Profil, Kandidat und Zielslot-Item. Fehlender
   Vergleichskontext ergibt `unknown`; Providerantworten können diese Fakten nicht verändern.
 
+### Persistierte Candidates, History und Vollbackup
+
+- `POST /api/items/evaluate` bleibt nebenwirkungsfrei; eine separate Save-Aktion parst und
+  bewertet den Candidate serverseitig erneut gegen den aktuellen lokalen Stand.
+- Evaluationen speichern lokale Scores, Category, Delta-Band, Confidence, Completeness,
+  Regelversion und vollständige lokale Facts-/Hard-Check-/Comparison-Snapshots.
+- Die stabil validierten Statuswerte sind `checked`, `equipped`, `stored`, `listed`, `sold`
+  und `vendor`; Decimal-sichere Listing-/Sale-Daten und Notizen liegen in `SaleRecord`.
+- History-Liste, Detail, Filter, Metadatenpflege und Recompare sind in API und deutscher UI
+  verfügbar. Recompare ist append-only und referenziert den Vorgänger als Lineage.
+- Das versionierte Vollbackup enthält Profil, Equipment einschließlich explizit leerer Slots,
+  Items/Modifier, Evaluationen und Sales. Restore validiert Schema und Referenzen vollständig
+  und ersetzt die lokale Domäne atomar.
+- Migration `0004_evaluation_history` ist additiv und besitzt geprüfte Upgrade-/Downgrade-Pfade.
+
 ### Versionierte Build-Fit-Bewertung
 
 - `app/rules/build-fit-v1.json` enthält die erste strikt validierte, versionierte lokale
@@ -102,6 +117,23 @@ behaupten. Oberfläche und Erklärungen bleiben deutsch; PoE-Bezeichnungen bleib
   werden gegen `ring_1` und `ring_2` verglichen; nur ein eindeutig besseres Delta wird empfohlen.
 - Lokale Scores, Evidence, Kategorien und Hard Checks bleiben auch ohne API-Token vollständig
   verfügbar. Die AI-Ausgabe ist nachgeordnet und kann die lokale Entscheidung nicht ersetzen.
+
+### Kalibrierte Build-Fit-v2-Regeln und Dateiworkflow
+
+- `app/rules/build-fit-v2.json` ist die aktive, strikt validierte Regelversion. Die v1-Datei
+  bleibt für reproduzierbare Vergleichstests erhalten.
+- Geeignete additive Modifier werden linear nach ihrem einzelnen beobachteten Rollwert bis zu
+  einem modifikatorspezifischen Cap gewichtet. Fehlende oder mehrdeutige Werte werden nicht
+  geschätzt, sondern senken Vollständigkeit und Confidence.
+- Gesamt-Energy-Shield und zugrunde liegende ES-Modifier werden weiterhin nie gemeinsam
+  bewertet. Rollwert-Caps und beobachtete Werte stehen in der Evidence.
+- Die vorhandenen Seed-Fixtures dokumentieren `v2 - v1`: Wand -24, Gloves -2, Boots -22.
+- Die Vergleichsresponse liefert Regelversion, Confidence, Vollständigkeit, relevante und
+  unbekannte Modifier sowie vorgruppierte Candidate-/Equipped-Gewinner und -Verlierer.
+  Hard Checks bleiben separat und die lokale Kategorie bleibt die maßgebliche Entscheidung.
+- Die UI importiert JSON-Dateien mit Schema v1/v2 nach lokaler Größen-, JSON- und
+  Versionsprüfung. Backendfehler werden sicher und ohne Rohdatenanzeige ausgegeben.
+  Der vollständige v2-Snapshot kann über die vorhandene Export-API heruntergeladen werden.
 
 ## Getroffene Entscheidungen
 
@@ -134,11 +166,11 @@ behaupten. Oberfläche und Erklärungen bleiben deutsch; PoE-Bezeichnungen bleib
 
 ## Ausgeführte Tests und Prüfungen
 
-- Backend: **104 Tests bestanden** (`pytest`). Darin enthalten sind die fünf dokumentierten
+- Backend: **114 Tests bestanden** (`pytest`). Darin enthalten sind die fünf dokumentierten
   Testitems mit Fake-Provider und ohne Netzwerk-/Kostenaufrufe.
 - Ruff: ohne Befund.
 - Python-`compileall`: erfolgreich.
-- Frontend: **17 Vitest-Tests bestanden**.
+- Frontend: **34 Vitest-Tests bestanden**.
 - TypeScript-/Vite-Produktionsbuild: erfolgreich.
 - `git diff --check`: ohne Befund.
 - Geprüft wurden unter anderem Structured Outputs, `store=False`, Refusal und Rate-Limit,
@@ -148,7 +180,8 @@ behaupten. Oberfläche und Erklärungen bleiben deutsch; PoE-Bezeichnungen bleib
   Slots, Missing-als-`unknown`, Score-/Evidence-Invarianten, sämtliche Delta-Grenzwerte,
   ES-Doppelzählung, negative Cast-Speed-Synergie, semantisch ungültige Regelkonfigurationen,
   verbleibende Equipment-Requirements, Ring-Doppelvergleiche und veraltete asynchrone
-  UI-Antworten bei Profil-/Equipmentänderungen.
+  UI-Antworten bei Profil-/Equipmentänderungen sowie v2-Konfigurationsgrenzen,
+  Rollwert-Caps und reproduzierbare v1-v2-Fixture-Differenzen.
 - Alembic-Upgrades bis `head` sowie gezielte Upgrade-/Downgrade-Prüfungen der neuen Migrationen
   liefen auf einer frischen SQLite-Datenbank erfolgreich.
 - Es wurden keine Live-Aufrufe an OpenAI ausgeführt.
@@ -171,34 +204,55 @@ behaupten. Oberfläche und Erklärungen bleiben deutsch; PoE-Bezeichnungen bleib
 - Nur bekannte additive Modifier fließen in Swap-Werte ein. Unbekannte oder nicht additive
   Effekte werden nicht geschätzt; manuell veraltete Character-Sheet-Werte können Ergebnisse
   entsprechend verfälschen.
-- Die Build-Fit-v1-Gewichte sind eine erste nachvollziehbare Heuristik und noch nicht anhand
+- Die Build-Fit-v2-Gewichte sind eine nachvollziehbare Heuristik und noch nicht anhand
   größerer eigener Verkaufs-/Upgrade-Daten kalibriert. Scores sind relative Entscheidungshilfe,
   keine exakte DPS- oder Marktwertberechnung.
-- Der aktuelle Scorer bewertet bekannte Modifier primär regelbasiert nach Vorhandensein und
-  Slotpriorität. Eine feinere, rollwertabhängige Normalisierung ist noch nicht für alle Modifier
-  definiert.
-- Die Management-UI ist funktional, besitzt aber noch keinen komfortablen Seed-Dateidialog oder
-  Export-Download; Import und Export stehen derzeit als API bereit.
-- Persistenz geprüfter Kandidaten, Historie, OCR, Backup und Restore fehlen weiterhin im
-  Nutzerfluss.
+- Nicht alle Modifier sind sinnvoll rollwertabhängig. Skill-Level-Modifikatoren bleiben deshalb
+  diskrete Präsenzregeln; unbekannte oder mehrwertige additive Effekte werden nicht geschätzt.
+- OCR fehlt weiterhin. Persistenz geprüfter Kandidaten, lokale History und Vollbackup/Restore
+  sind jetzt im Nutzerfluss verfügbar.
 - Docker-Secret-Mounts müssen deploymentspezifisch eingerichtet werden; README und
   `.env.example` dokumentieren Env- und Key-File-Varianten.
 
 ## Empfohlener nächster Schritt
 
-Als nächster Meilenstein sollte die **Kalibrierung und Nutzbarkeit der lokalen Bewertung**
-verbessert werden:
+Vor einem neuen Produktmeilenstein muss der aktuelle Stand einmal als integrierter Nutzerfluss
+abgenommen und gesichert werden. Danach bietet sich die **Kalibrierung anhand eigener geprüfter
+History-Daten** an. Dazu gehören ein Review-/Label-Workflow und Auswertungen, die
+Regeländerungen vor einer neuen Version reproduzierbar gegen alte Snapshots prüfen.
+Live-Marktdaten bleiben ein separater, ausdrücklich opt-in Meilenstein.
 
-1. Build-Fit-v1 anhand weiterer realer, manuell bewerteter Itempaare kalibrieren und Änderungen
-   nur über eine neue Regelversion mit dokumentierten Score-Differenzen einführen.
-2. Rollwertabhängige, gekappte Transformationen für geeignete Modifier ergänzen, ohne
-   Energy-Shield- oder andere Endwerte doppelt zu zählen.
-3. Confidence und unbekannte relevante Modifier in der Oberfläche deutlicher zusammenfassen;
-   Gewinner, Verlierer und Hard-Check-Evidence benutzerfreundlich gruppieren.
-4. Seed-Import und v2-Export als Dateidialog/Download in die UI integrieren.
-5. Danach Persistenz geprüfter Kandidaten und eine Vergleichshistorie umsetzen; Live-Marktdaten
-   bleiben ein separater, ausdrücklich opt-in Meilenstein.
+## Übergabe für die nächste Sitzung
 
-Vor diesem Meilenstein empfiehlt sich ein einmaliger manueller Smoke-Test des aktuellen
-Providerpfads mit einem begrenzten Testprojekt/API-Key. Dabei dürfen keine Secrets oder
-vollständigen Itemtexte geloggt oder in Fixtures übernommen werden.
+Stand beim Sitzungsende am 16. Juli 2026:
+
+- Build-Fit v2, Dateiimport/-export, persistierte Candidates, History, Recompare,
+  Verkaufsmetadaten sowie Vollbackup/Restore sind implementiert und dokumentiert.
+- Die Implementierung liegt **noch uncommittet** im Arbeitsverzeichnis. Vorhandene Änderungen
+  dürfen in der nächsten Sitzung nicht verworfen oder überschrieben werden.
+- Die neue additive Migration `0004_evaluation_history` ist vorhanden, wurde in automatischen
+  Upgrade-/Downgrade-Tests geprüft, muss aber für die lokale Anwendungsdatenbank noch mit
+  `.venv/bin/alembic upgrade head` angewendet werden.
+- Letzter vollständiger Prüfstand: **114 Backendtests** und **34 Frontendtests** bestanden;
+  Ruff, `compileall`, TypeScript-/Vite-Build und `git diff --check` waren erfolgreich.
+- Ein unabhängiger Code-Review wurde durchgeführt. Die Findings zu Restore-Sicherheit,
+  Body-Limit, Backup-Referenzen, Candidate-/Status-Konsistenz, Sale-Validierung,
+  asynchronen UI-Rennen und Pagination wurden behoben.
+- Es wurden keine echten OpenAI-Aufrufe ausgeführt. Docker wurde für diesen Stand nicht gebaut.
+- Es existiert noch kein Commit oder Pull Request für diese beiden Meilensteine.
+
+In der nächsten Sitzung in dieser Reihenfolge fortfahren:
+
+1. `git status` prüfen und die vorhandenen uncommitteten Änderungen beibehalten.
+2. `.venv/bin/alembic upgrade head` auf der lokalen Datenbank ausführen.
+3. Manuellen Browser-Smoke-Test durchführen: Profil/Equipment laden, Candidate bewerten und
+   speichern, History filtern, Status und Sale-Daten pflegen, Recompare ausführen sowie
+   Vollbackup herunterladen und nach ausdrücklicher Bestätigung wiederherstellen.
+4. Wenn Docker verfügbar ist, den Multi-Stage-Build und den Containerstart prüfen.
+5. Optional den Providerpfad einmal mit einem begrenzten Testprojekt/API-Key testen. Dabei
+   keine Secrets oder vollständigen Itemtexte loggen oder in Fixtures übernehmen.
+6. Anschließend Gesamttests wiederholen, Diff prüfen und den Stand auf einem Feature-Branch
+   committen beziehungsweise als Draft Pull Request sichern.
+7. Erst danach den nächsten Produktmeilenstein beginnen: Review-/Label-Workflow und
+   Kalibrierungsauswertungen auf Basis der gespeicherten History. OCR folgt als separater
+   späterer Meilenstein.

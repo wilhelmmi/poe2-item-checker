@@ -1,9 +1,9 @@
 # PoE 2 Gear & Trade Checker
 
-Lokaler erster Projektschnitt mit FastAPI, SQLAlchemy/Alembic, strikt typisiertem
-React/Vite-Frontend, verlustbewahrendem Parser und einem konservativen regelbasierten
-Faktencheck. Equipmentvergleich, Upgrade- oder Score-Logik, OCR, Livepreise und eine
-vollständige produktive UI sind bewusst noch nicht implementiert.
+Lokale Web-App mit FastAPI, SQLAlchemy/Alembic, strikt typisiertem React/Vite-Frontend,
+verlustbewahrendem Parser und konservativem regelbasiertem Faktencheck. Der versionierte
+lokale Equipmentvergleich bewertet Candidate und Equipped Item nachvollziehbar; OCR,
+Livepreise und Vergleichshistorie sind bewusst noch nicht implementiert.
 
 ## Schnellstart auf einem neuen Rechner
 
@@ -198,9 +198,53 @@ serverseitig aus bekannten Profil-, Equipment- und Parserwerten erzeugt. Fehlend
 ergeben `unknown`, niemals geschätzte Werte; der AI-Provider kann die Checks nicht ändern.
 
 Der lokale Build-Fit-Scorer wird durch die strikt validierte, versionierte Konfiguration
-`app/rules/build-fit-v1.json` gesteuert. Candidate und Equipped Item durchlaufen exakt
+`app/rules/build-fit-v2.json` gesteuert. Geeignete additive Modifier werden anhand ihres
+Wertes bis zu einer dokumentierten Obergrenze gewichtet. Beobachtetes Gesamt-Energy-Shield
+ersetzt weiterhin die Wertung zugrunde liegender ES-Affixe und verhindert Doppelzählung.
+Candidate und Equipped Item durchlaufen exakt
 dieselbe 0–100-Logik; die Response nennt Regel-Evidence, Delta und die lokale Kategorie.
 Rings werden ohne expliziten Zielslot gegen beide Ring-Slots verglichen. Harte Swap-Checks
 prüfen auch Requirements der verbleibenden Ausrüstung und können eine positive
 Score-Kategorie nur konservativer machen. Die lokalen Scores bleiben auch ohne API-Key
 verfügbar; AI-Ausgaben dienen ausschließlich als nachgeordnete Erklärung.
+
+Die Management-Oberfläche importiert lokale JSON-Dateien mit `schema_version: 1` oder den
+vollständigen Snapshot mit `schema_version: 2`. Dateigröße, JSON und Version werden vor dem
+Upload geprüft; fachlich ungültige Daten weist das Backend atomar zurück. „v2-Export
+herunterladen“ lädt den vollständigen Snapshot über die bestehende Export-API herunter.
+Im Vergleich zeigt die UI Vollständigkeit und lokale Confidence sowie getrennte Gewinner-,
+Verlierer- und Hard-Check-Gruppen. Die lokale Kategorie bleibt dabei maßgeblich.
+
+### Build-Fit-Kalibrierung v1 → v2
+
+Die v1-Datei bleibt zur Reproduktion erhalten. Auf drei vorhandenen Seed-Items ergeben sich
+durch die Rollwertnormalisierung folgende fest getestete Score-Differenzen (`v2 - v1`):
+
+| Slot | Differenz |
+| --- | ---: |
+| Wand | -24 |
+| Gloves | -2 |
+| Boots | -22 |
+
+Die Differenzen sind Heuristik-Kalibrierung, keine DPS-Prozentwerte. Werte oberhalb des je
+Modifier konfigurierten Caps erhalten keine zusätzlichen Punkte.
+
+## Kandidaten-History und Vollbackup
+
+`POST /api/items/evaluate` bleibt ohne Persistenznebenwirkung. Erst `POST /api/history`
+speichert einen Candidate bewusst; das Backend parst den Rawtext erneut und vergleicht ihn
+lokal mit aktuellem Profil und Equipment. AI-Ausgaben werden nicht als Entscheidungsgrundlage
+persistiert. Stabile Statuswerte sind `checked`, `equipped`, `stored`, `listed`, `sold` und
+`vendor`.
+
+`GET /api/history` liefert neueste Einträge zuerst mit begrenzter Pagination und Filtern für
+Slot, lokale Category, Status, Datum, Base Type und Rarity. Status, Notizen sowie optionale
+Listing-/Sale-Zeitpunkte, Currency und Decimal Amounts werden über `PUT /api/history/{id}`
+gepflegt. `POST /api/history/{id}/recompare` legt stets eine neue Evaluation mit aktueller
+Regelversion und Lineage an; der alte Snapshot bleibt unverändert.
+
+`GET /api/backup` exportiert Profil, alle Equipment-Slots einschließlich explizit leerer
+Slots, Items/Modifier, Evaluationen und Sale-Metadaten verlustfrei als `schema_version: 1`.
+`POST /api/backup/restore` ist ein vollständiger Replace-Restore. Schema und Referenzen werden
+vorab validiert; Fehler rollen die ganze Transaktion zurück. Die Equipment-v1/v2-API bleibt
+davon unabhängig und unverändert.

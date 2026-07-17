@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -104,13 +104,24 @@ class Evaluation(Base):
     trade_potential_score: Mapped[int | None]
     trade_recommendation: Mapped[str | None] = mapped_column(String(50))
     confidence: Mapped[str | None] = mapped_column(String(20))
+    completeness: Mapped[str | None] = mapped_column(String(20))
+    rule_version: Mapped[int | None]
+    status: Mapped[str] = mapped_column(String(20), default="checked")
+    local_category: Mapped[str | None] = mapped_column(String(50))
+    local_delta_band: Mapped[str | None] = mapped_column(String(30))
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    parent_evaluation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("evaluations.id", ondelete="SET NULL"), index=True,
+    )
     reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class SaleRecord(Base):
     __tablename__ = "sale_records"
+    __table_args__ = (UniqueConstraint("item_id", name="uq_sale_records_item_id"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     item_id: Mapped[str] = mapped_column(ForeignKey("items.id"), index=True)
     listed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
