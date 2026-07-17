@@ -7,6 +7,10 @@ form { display: grid; gap: .75rem; }
 textarea { resize: vertical; padding: 1rem; color: inherit; background: #201c18; border: 1px solid #65553b; font: inherit; }
 button { width: max-content; padding: .7rem 1.2rem; color: #151311; background: #d9ad65; border: 0; font-weight: 700; }
 button:disabled { opacity: .6; }
+.file-button { width: max-content; padding: .7rem 1.2rem; color: #151311; background: #d9ad65; font-weight: 700; cursor: pointer; }
+.file-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.evidence-group { margin: .75rem 0; padding: .5rem 1rem; border-left: 2px solid #65553b; }
+.check-fail { color: #ffb4a8; } .check-unknown { color: #e8c98e; } .check-pass { color: #acd49c; }
 .preview { margin-top: 2rem; padding: 1.5rem; border: 1px solid #65553b; background: #201c18; }
 .suggestion { margin-top: 2rem; padding: 1.5rem; border: 1px solid #d9ad65; background: #272117; display: grid; gap: .75rem; }
 .actions { display: flex; gap: .75rem; flex-wrap: wrap; }

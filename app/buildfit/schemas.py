@@ -14,6 +14,8 @@ class Evidence(BaseModel):
     rule_id: str
     points: int
     message: str
+    value: float | None = None
+    cap: float | None = None
 
 
 class ScoredItem(BaseModel):
@@ -23,6 +25,17 @@ class ScoredItem(BaseModel):
     unknown_modifier_count: int
     completeness: Literal["complete", "partial"]
     warnings: list[str]
+    confidence: Literal["high", "medium", "low"]
+    known_relevant_modifier_count: int
+    rule_version: int
+
+
+class EvidenceGroups(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidate_winners: list[Evidence]
+    candidate_losers: list[Evidence]
+    equipped_winners: list[Evidence]
+    equipped_losers: list[Evidence]
 
 
 class SlotComparison(BaseModel):
@@ -35,6 +48,7 @@ class SlotComparison(BaseModel):
     category: Category
     hard_checks: HardChecks
     warnings: list[str]
+    evidence_groups: EvidenceGroups
 
 
 class LocalComparison(BaseModel):

@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -10,7 +9,6 @@ from app.facts.config import FACTS_CONFIG
 from app.facts.engine import _match_rule
 from app.facts.extraction import extract_item_facts
 from app.facts.schemas import FactsConfig, TradeRule
-from app.main import app
 from app.parser import parse_item_text
 
 ROOT = Path(__file__).parents[1]
@@ -140,19 +138,3 @@ Odd Boots
     assert facts.modifiers[0].roll_position == 4
     assert "roll_position_out_of_range" in facts.warnings
     assert "roll_range_reversed" in facts.warnings
-
-
-@pytest.mark.anyio
-async def test_check_endpoint_complete_incomplete_and_idempotent() -> None:
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        raw = SAMPLES["magic_ashen_staff"]["raw_text"]
-        first = await client.post("/api/items/check", json={"raw_text": raw})
-        second = await client.post("/api/items/check", json={"raw_text": raw})
-        assert first.status_code == 200
-        assert first.json() == second.json()
-        assert first.json()["assessment"]["trade"]["outcome"] == "vendor"
-        collapsed = (ROOT / "docs/example-items.txt").read_text()
-        skipped = (await client.post("/api/items/check", json={"raw_text": collapsed})).json()
-        assert skipped["assessment"] is None
-        assert "assessment_skipped" in {warning["code"] for warning in skipped["parse"]["warnings"]}

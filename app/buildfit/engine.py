@@ -1,18 +1,17 @@
-from app.buildfit.config import BUILD_FIT_CONFIG
-from app.buildfit.schemas import Evidence, LocalComparison, ScoredItem, SlotComparison
+from app.buildfit.config import BUILD_FIT_CONFIG, BuildFitConfig
+from app.buildfit.schemas import Evidence, EvidenceGroups, LocalComparison, ScoredItem, SlotComparison
 from app.comparison.engine import compare_hard_checks
 from app.db.models import CharacterProfile
 from app.schemas.items import ParsedItem
 from app.schemas.management import Slot
 
 
-def score_item(item: ParsedItem, slot: Slot) -> ScoredItem:
-    config = BUILD_FIT_CONFIG
+def score_item(item: ParsedItem, slot: Slot, config: BuildFitConfig = BUILD_FIT_CONFIG) -> ScoredItem:
     points = config.base_score
     evidence = [Evidence(rule_id="base", points=config.base_score, message="Build-Fit-Basiswert.")]
     unknown = 0
-    modifier_points: dict[str, int] = {}
-    for modifier in item.modifiers:
+    relevant = 0
+    for index, modifier in enumerate(item.modifiers):
         key = modifier.normalized_key
         if key == "unknown":
             unknown += 1
@@ -22,13 +21,28 @@ def score_item(item: ParsedItem, slot: Slot) -> ScoredItem:
             continue
         if key == "maximum_energy_shield" and item.energy_shield is not None:
             continue
-        awarded = round(weight * config.slot_multipliers.get(slot, {}).get(key, 1.0))
+        transformed_value = None
+        cap = None
+        factor = 1.0
+        transformation = config.roll_transformations.get(key)
+        if transformation is not None:
+            if len(modifier.values) != 1:
+                unknown += 1
+                continue
+            transformed_value = modifier.values[0]
+            if transformed_value <= 0:
+                unknown += 1
+                continue
+            cap = transformation.value_cap
+            factor = max(transformation.minimum_factor, min(1.0, transformed_value / cap))
+        awarded = round(weight * config.slot_multipliers.get(slot, {}).get(key, 1.0) * factor)
         points += awarded
-        modifier_points[key] = modifier_points.get(key, 0) + awarded
-    evidence.extend(
-        Evidence(rule_id=f"modifier.{key}", points=awarded, message=f"{key} ist für den Build relevant.")
-        for key, awarded in modifier_points.items()
-    )
+        relevant += 1
+        message = f"{key} ist für den Build relevant."
+        if transformation:
+            message += f" Rollwert wird bei {cap:g} gekappt."
+        evidence.append(Evidence(rule_id=f"modifier.{key}.{index}", points=awarded, message=message,
+                                 value=transformed_value, cap=cap))
     if item.energy_shield is not None:
         awarded = min(config.defence_caps["energy_shield"], item.energy_shield // 20)
         points += awarded
@@ -39,10 +53,13 @@ def score_item(item: ParsedItem, slot: Slot) -> ScoredItem:
             rule_id="score.clamp", points=score - points,
             message=f"Rohwert {points} wurde auf den Bereich 0–100 begrenzt.",
         ))
+    confidence = "low" if unknown >= 2 else "medium" if unknown else "high"
     return ScoredItem(
         score=score, evidence=evidence, unknown_modifier_count=unknown,
         completeness="partial" if unknown else "complete",
         warnings=["unknown_modifiers_present"] if unknown else [],
+        confidence=confidence, known_relevant_modifier_count=relevant,
+        rule_version=config.schema_version,
     )
 
 
@@ -101,10 +118,17 @@ def compare_slots(
             or (equipped_score is not None and equipped_score.completeness == "partial")
         ):
             category = "conditional_upgrade"
+        groups = EvidenceGroups(
+            candidate_winners=[entry for entry in candidate_score.evidence if entry.points > 0],
+            candidate_losers=[entry for entry in candidate_score.evidence if entry.points < 0],
+            equipped_winners=[entry for entry in equipped_score.evidence if entry.points > 0] if equipped_score else [],
+            equipped_losers=[entry for entry in equipped_score.evidence if entry.points < 0] if equipped_score else [],
+        )
         comparisons.append(SlotComparison(
             target_slot=target, candidate=candidate_score, equipped=equipped_score,
             delta=delta, delta_band=band, category=category, hard_checks=hard,
             warnings=[*candidate_score.warnings, *warnings],
+            evidence_groups=groups,
         ))
     eligible = [
         value for value in comparisons
