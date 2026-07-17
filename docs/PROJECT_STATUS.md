@@ -16,6 +16,12 @@ Stand: 2026-07-17 — API-only Pivot umgesetzt und validiert.
 - Das Slot-Eingabefeld formatiert vollständige Paste-Eingaben sofort sichtbar. Mehrdeutige
   Texte werden nur soweit sicher möglich strukturiert und bleiben vor dem Speichern prüfbar.
 - Bulk-Imports bleiben verlustfrei und werden nicht stillschweigend autoformatiert.
+- Der vollständige v1/v2-Equipmentimport aktualisiert nach Erfolg den aktuell gewählten
+  Slot-Editor und meldet die Anzahl belegter Slots; einzelne Slots müssen nicht nachgespeichert
+  werden.
+- Nach einer erfolgreichen API-Empfehlung kann der Candidate explizit ausgerüstet werden.
+  Dabei wird exakt der verglichene Zielslot atomar ersetzt und die alte Vergleichsaussage
+  unmittelbar invalidiert. Das vorherige Item bleibt nur intern nicht-destruktiv erhalten.
 - Die UI führt vor Vergleichen ein Parse-Preflight aus, zeigt Autoformatierung samt exaktem
   Undo und stoppt mehrdeutige Eingaben vor dem Provider-Aufruf.
 - Provider erhält Candidate, exakt ausgerüstetes Zielslot-Item, Zielslot, beobachtetes Profil
@@ -45,7 +51,7 @@ Produkts. Eine spätere Datenbereinigung braucht eine separate, bewusst freigege
 
 - Ruff: ohne Befund.
 - Backend: 144 Tests bestanden.
-- Frontend: 14 Vitest-Tests bestanden.
+- Frontend: 17 Vitest-Tests bestanden.
 - TypeScript-Prüfung und Vite-Produktionsbuild: erfolgreich.
 - Code-Review durchgeführt; alle hoch priorisierten Findings wurden behoben.
 

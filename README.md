@@ -61,6 +61,10 @@ bleiben bestehen. Alte History-/Sale-Daten und Datenbankfelder werden aus
 Kompatibilitätsgründen nicht destruktiv migriert, gehören aber nicht mehr zum aktiven UI-
 oder Bewertungsflow.
 
+Die GUI kann vollständige Equipment-Snapshots mit `schema_version: 1` oder `2` atomar
+importieren. Nach einem erfolgreichen Vergleich ersetzt „Candidate ausrüsten“ das Item im
+exakt verglichenen Zielslot; das vorherige Item ist anschließend nicht mehr ausgerüstet.
+
 ## Qualität
 
 ```bash

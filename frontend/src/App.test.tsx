@@ -62,4 +62,41 @@ describe('API-only comparison', () => {
     await waitFor(()=>expect(textarea.value).toBe(formatted))
     expect(screen.getByText('Equipment-Text wurde automatisch formatiert.')).toBeTruthy()
   })
+  it('equips the compared candidate into the exact target slot', async () => {
+    const parse={item:parsedItem,warnings:[],line_break_suggestion:null,auto_format_status:'unchanged'}
+    const saved={id:'new-item',item:{...parsedItem,raw_text:'item'}}
+    const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(parse):input==='/api/items/evaluate'?response(evaluation):response(saved))
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}})
+    fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText('Candidate ist besser')
+    fireEvent.click(screen.getByRole('button',{name:'Candidate ausrüsten'}))
+    expect(await screen.findByText(/Candidate wurde in wand ausgerüstet/)).toBeTruthy()
+    const saveCall=fetchMock.mock.calls.find(call=>call[0]==='/api/equipment/wand')
+    expect(JSON.parse(saveCall![1]!.body as string)).toEqual({raw_text:'item'})
+    expect(screen.queryByText('Candidate ist besser')).toBeNull()
+  })
+  it('does not send a second equipment mutation on a rapid equip double click', async () => {
+    const parse={item:parsedItem,warnings:[],line_break_suggestion:null,auto_format_status:'unchanged'}
+    let finishSave:(value:Response)=>void=()=>undefined
+    const pendingSave=new Promise<Response>(resolve=>{finishSave=resolve})
+    const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(parse):input==='/api/items/evaluate'?response(evaluation):pendingSave)
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}})
+    fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText('Candidate ist besser')
+    const equip=screen.getByRole('button',{name:'Candidate ausrüsten'})
+    fireEvent.click(equip);fireEvent.click(equip)
+    expect(fetchMock.mock.calls.filter(call=>call[0]==='/api/equipment/wand')).toHaveLength(1)
+    finishSave(new Response(JSON.stringify({id:'new-item',item:parsedItem}),{status:200,headers:{'Content-Type':'application/json'}}))
+    expect(await screen.findByText(/Candidate wurde in wand ausgerüstet/)).toBeTruthy()
+  })
+  it('updates the selected slot after a complete equipment import', async () => {
+    const importedSlots:Record<string,{id:string;item:typeof parsedItem}|null>=Object.fromEntries(['wand','focus','helmet','body_armour','gloves','boots','belt','ring_1','ring_2','amulet'].map(slot=>[slot,null]))
+    importedSlots.wand={id:'wand-item',item:{...parsedItem,raw_text:'formatted wand'}}
+    const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response({slots:importedSlots}))
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
+    const file={size:100,text:async()=>JSON.stringify({schema_version:2})} as File
+    fireEvent.change(screen.getByLabelText('Equipment-Datei importieren'),{target:{files:[file]}})
+    expect(await screen.findByText(/Komplettes Equipment importiert: 1 von 10 Slots belegt/)).toBeTruthy()
+    expect((screen.getByLabelText('Itemtext des Slots') as HTMLTextAreaElement).value).toBe('formatted wand')
+  })
 })
