@@ -19,8 +19,11 @@ Stand: 2026-07-17 — API-only Pivot umgesetzt und validiert.
   und den vollständigen versionierten Build-Kontext.
 - Ein leerer Zielslot wird vor dem Provideraufruf mit `equipped_item_required` abgewiesen.
 - Item-Rohtext, unbekannte Rohzeilen, Modifier-Rohtext sowie Profilname und -notizen werden
-  nicht an den Provider übertragen. Freitext-Ausgaben mit Marktwert-, Crafting-, Score- oder
-  Prozentbehauptungen werden zusätzlich schema-seitig verworfen.
+  nicht an den Provider übertragen. Beobachtete Prozent-Modifier, sachliche Trade-offs und
+  die Tatsache eines crafted Modifiers sind in Gründen erlaubt. Unbelegte relative
+  Leistungsprozente, Markt-/Preis-/Sale-Aussagen und Crafting-Handlungen oder -Empfehlungen
+  werden schema-seitig verworfen. ValidationError-Logs enthalten nur Phase, Fehleranzahl,
+  Typ/Ort und interne Rulecodes, nie Freitext, Input oder Validation-Context.
 
 ## Build-Registry
 
@@ -38,7 +41,7 @@ Produkts. Eine spätere Datenbereinigung braucht eine separate, bewusst freigege
 ## Validierung
 
 - Ruff: ohne Befund.
-- Backend: 108 Tests bestanden.
+- Backend: 142 Tests bestanden.
 - Frontend: 13 Vitest-Tests bestanden.
 - TypeScript-Prüfung und Vite-Produktionsbuild: erfolgreich.
 - Code-Review durchgeführt; alle hoch priorisierten Findings wurden behoben.
