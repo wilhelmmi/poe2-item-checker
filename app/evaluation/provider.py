@@ -1,7 +1,7 @@
 from typing import Protocol
 
 from app.evaluation.schemas import EvaluationResult
-from app.facts.schemas import ItemFacts
+from app.evaluation.schemas import EvaluationInput
 
 
 class EvaluationProviderError(Exception):
@@ -16,4 +16,4 @@ class EvaluationProvider(Protocol):
     name: str
     model: str
 
-    async def evaluate(self, facts: ItemFacts) -> EvaluationResult: ...
+    async def evaluate(self, evaluation_input: EvaluationInput) -> EvaluationResult: ...

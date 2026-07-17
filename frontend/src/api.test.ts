@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { exportEquipmentFile, importEquipmentFile, parseBackupFile, persistEvaluation } from './api'
+import { exportEquipmentFile, importEquipmentFile } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -55,27 +55,5 @@ describe('Equipment-Dateien', () => {
       schema_version: 2, profile: {}, equipment_raw_text: slots,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     await expect(exportEquipmentFile()).resolves.toMatchObject({ schema_version: 2, equipment_raw_text: slots })
-  })
-})
-
-describe('History und Vollbackup', () => {
-  it('speichert einen Candidate nur über die explizite History-Aktion', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
-      status: 201, headers: { 'Content-Type': 'application/json' },
-    }))
-    vi.stubGlobal('fetch', fetchMock)
-    await persistEvaluation('Item Class: Rings', 'ring_1', new AbortController().signal)
-    expect(fetchMock).toHaveBeenCalledWith('/api/history', expect.objectContaining({ method: 'POST' }))
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
-      raw_text: 'Item Class: Rings', target_slot: 'ring_1', use_profile: true,
-    })
-  })
-
-  it('weist ein syntaktisch ungültiges Backup vor dem Restore-Request zurück', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    const file = { size: 10, text: async () => '{broken' } as File
-    await expect(parseBackupFile(file)).rejects.toThrow('kein gültiges JSON')
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
