@@ -11,7 +11,7 @@ from app.api.routes import database
 import app.api.routes as routes
 import app.builds.service as build_service
 from app.builds.registry import DEFAULT_BUILD_ID, V1_BUILD_ID
-from app.builds.provider import OpenAIBuildProvider, extract_citations
+from app.builds.provider import PROMPT, OpenAIBuildProvider, extract_citations
 from app.builds.schemas import BuildAnalysis, BuildCitation
 from app.builds.service import (canonicalize_source_url, confirm_preview, create_preview,
                                 delete_custom_build, get_active, get_any_build, list_all_builds,
@@ -33,6 +33,13 @@ def analysis(name: str = "Chaos Lich") -> BuildAnalysis:
         offensive_priorities=["Chaos skill levels"], defensive_priorities=["Energy Shield"],
         item_priorities=["+ Level to Chaos Spell Skills"], low_value_stats=["Accuracy"],
         constraints=["Mana sustain"], uncertainties=["Exact breakpoint unknown"])
+
+
+def test_build_analysis_prompt_keeps_sources_out_of_structured_fields() -> None:
+    assert "`source_variant`" in PROMPT
+    assert "höchstens 100 Zeichen" in PROMPT
+    assert "keines der Analysefelder URLs, Markdown, Quellenangaben" in PROMPT
+    assert "ausschließlich über die URL-Citation-Annotations" in PROMPT
 
 
 @pytest.mark.parametrize("url", [
