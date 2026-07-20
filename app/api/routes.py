@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session
 from app.evaluation.provider import EvaluationProviderError
 from app.evaluation.schemas import EvaluateItemRequest, EvaluateItemResponse, EvaluationInput
 from app.evaluation.service import get_evaluation_provider
-from app.builds.registry import BuildContext, get_build, list_builds
+from app.builds.registry import BuildContext
+from app.builds.provider_service import get_build_provider
+from app.builds.schemas import ActiveBuild, BuildPreviewRequest, BuildPreviewResponse
+from app.builds.service import (canonicalize_source_url, confirm_preview, create_preview,
+                                get_active, get_any_build, list_all_builds, row_context, set_active)
 from app.db.session import SessionLocal
 from app.db.models import CharacterProfile, EquipmentSlot, Item
 from app.equipment.service import (
@@ -16,6 +20,7 @@ from app.equipment.service import (
     profile_schema,
     put_profile,
     replace_equipment,
+    equip_loadout,
 )
 
 from app.parser.service import (
@@ -25,11 +30,13 @@ from app.parser.service import (
 )
 from app.schemas.health import HealthResponse
 from app.schemas.parsing import ParseItemRequest, ParseItemResponse
+from app.schemas.items import ParsedItem
 from app.schemas.management import (
     EquipmentExport,
     EquipmentImportData,
     EquipmentItem,
     EquipmentPut,
+    EquipmentEquip,
     EquipmentResponse,
     ProfileData,
     Slot,
@@ -52,8 +59,48 @@ async def health() -> HealthResponse:
 
 
 @router.get("/builds", response_model=list[BuildContext])
-async def get_builds() -> tuple[BuildContext, ...]:
-    return list_builds()
+async def get_builds(db: Session = Depends(database)) -> tuple[BuildContext, ...]:
+    return list_all_builds(db)
+
+
+@router.get("/builds/active", response_model=ActiveBuild)
+async def active_build(db: Session = Depends(database)) -> ActiveBuild:
+    return ActiveBuild(build_id=get_active(db))
+
+
+@router.put("/builds/active", response_model=ActiveBuild)
+async def update_active_build(data: ActiveBuild, db: Session = Depends(database)) -> ActiveBuild:
+    try:
+        return ActiveBuild(build_id=set_active(db, data.build_id))
+    except ValueError as exc:
+        raise HTTPException(422, detail={"code": "unknown_build", "message": "Der Build ist nicht verfügbar."}) from exc
+
+
+@router.post("/builds/previews", response_model=BuildPreviewResponse)
+async def analyze_build(data: BuildPreviewRequest, db: Session = Depends(database)) -> BuildPreviewResponse:
+    try:
+        source_url = canonicalize_source_url(data.source_url)
+    except ValueError as exc:
+        raise HTTPException(422, detail={"code": "invalid_build_url", "message": "Bitte eine öffentliche http(s)-Build-URL ohne Fragment eingeben."}) from exc
+    try:
+        provider = get_build_provider()
+        analysis, citations = await provider.analyze(source_url)
+    except EvaluationProviderError as exc:
+        raise HTTPException(exc.status_code, detail={"code": exc.code, "message": exc.public_message}) from exc
+    preview = create_preview(db, source_url, analysis, citations, provider.name, provider.model)
+    return BuildPreviewResponse(preview_id=preview.id, source_url=preview.source_url,
+        analysis=analysis, citations=citations, provider=preview.provider, model=preview.model,
+        expires_at=preview.expires_at.isoformat())
+
+
+@router.post("/builds/previews/{preview_id}/confirm", response_model=BuildContext)
+async def confirm_build(preview_id: str, db: Session = Depends(database)) -> BuildContext:
+    try:
+        return row_context(confirm_preview(db, preview_id))
+    except ValueError as exc:
+        code = str(exc)
+        status = 410 if code == "preview_expired" else 404 if code == "preview_not_found" else 409
+        raise HTTPException(status, detail={"code": code, "message": "Die Build-Vorschau ist nicht mehr verfügbar."}) from exc
 
 
 @router.get("/profile", response_model=ProfileData)
@@ -84,6 +131,15 @@ async def put_equipment(
         raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
 
 
+@router.post("/equipment/equip", response_model=EquipmentResponse)
+async def equip_item(data: EquipmentEquip, db: Session = Depends(database)) -> EquipmentResponse:
+    try:
+        return equip_loadout(db, data.raw_text, data.ring_slot)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+
+
 @router.post("/equipment/import", response_model=EquipmentResponse)
 async def import_equipment_seed(
     data: EquipmentImportData, db: Session = Depends(database)
@@ -92,7 +148,17 @@ async def import_equipment_seed(
         return import_equipment(db, data)
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+        code = str(exc)
+        messages = {
+            "item_slot_mismatch": "Mindestens ein Item passt nicht zu seinem Equipment-Slot.",
+            "incomplete_item": "Mindestens ein Itemtext ist ungültig oder unvollständig.",
+            "ambiguous_item_format": "Mindestens ein Itemtext ist nicht eindeutig formatiert.",
+            "two_handed_slot_conflict": "Ein Staff muss im Wand-Slot stehen und benötigt einen leeren Fokus-Slot.",
+        }
+        raise HTTPException(
+            status_code=422,
+            detail={"code": code, "message": messages.get(code, "Der Equipmentimport ist ungültig.")},
+        ) from exc
 
 
 @router.get("/equipment/export", response_model=EquipmentExport)
@@ -131,7 +197,10 @@ async def evaluate_item(
                 "message": "Der Itemtext ist nicht vollständig analysierbar.",
             },
         )
-    if parsed.item.item_class != SLOT_CLASSES[request.target_slot]:
+    is_staff = parsed.item.item_class == "Staves"
+    if parsed.item.item_class != SLOT_CLASSES[request.target_slot] and not (
+        is_staff and request.target_slot == "wand"
+    ):
         raise HTTPException(
             status_code=422,
             detail={
@@ -140,7 +209,7 @@ async def evaluate_item(
             },
         )
     try:
-        build = get_build(request.build_id)
+        build = get_any_build(db, request.build_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -148,9 +217,15 @@ async def evaluate_item(
         ) from exc
     from app.equipment.service import item_schema, profile_schema
 
-    row = db.get(EquipmentSlot, (1, request.target_slot))
-    equipped_orm = db.get(Item, row.item_id) if row and row.item_id else None
-    equipped = item_schema(equipped_orm) if equipped_orm else None
+    target_slots: list[Slot] = ["wand", "focus"] if is_staff else [request.target_slot]
+    equipped_slots: dict[Slot, ParsedItem | None] = {}
+    for target in target_slots:
+        row = db.get(EquipmentSlot, (1, target))
+        equipped_orm = db.get(Item, row.item_id) if row and row.item_id else None
+        equipped_slots[target] = item_schema(equipped_orm) if equipped_orm else None
+    equipped = equipped_slots[request.target_slot]
+    if equipped is None and is_staff:
+        equipped = equipped_slots["focus"]
     if equipped is None:
         raise HTTPException(
             status_code=422,
@@ -163,7 +238,9 @@ async def evaluate_item(
     evaluation_input = EvaluationInput(
         candidate=parsed.item,
         equipped=equipped,
+        equipped_slots=equipped_slots,
         target_slot=request.target_slot,
+        target_slots=target_slots,
         observed_profile=profile_schema(profile) if profile else None,
         build=build,
     )
@@ -176,6 +253,8 @@ async def evaluate_item(
             build=build,
             target_slot=request.target_slot,
             equipped=equipped,
+            equipped_slots=equipped_slots,
+            target_slots=target_slots,
             evaluation=None,
             provider=None,
             model=None,
@@ -191,6 +270,8 @@ async def evaluate_item(
         build=build,
         target_slot=request.target_slot,
         equipped=equipped,
+        equipped_slots=equipped_slots,
+        target_slots=target_slots,
         evaluation=evaluation,
         provider=provider.name,
         model=provider.model,

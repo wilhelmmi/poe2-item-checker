@@ -8,15 +8,14 @@ bleiben Itemtext-Parsing, technische Slotvalidierung sowie Profil-/Equipment-Per
 gibt keinen lokalen Score und keinen lokalen Empfehlungs-Fallback. Wenn der Provider oder
 API-Key fehlt, zeigt die App deshalb **keine Empfehlung**.
 
-## Unterstützter Build
+## Builds
 
-Die Build-Registry enthält zunächst
-`deadrabb1t-chaos-dot-lich-starter-v1`: **ED Contagion Chaos DoT Lich Starter** von
-DEADRABB1T, Mobalytics-Variante `default-variant`. Der versionierte Kontext enthält Essence
-Drain, Contagion, Dark Effigy und Despair sowie die Prioritäten Chaos-Spell-Level,
-Spell-/Chaos-Damage, Cast Speed als Bonus, hohen Energy Shield, ES-Recharge, Resistenzen
-und den Hinweis auf den hohen Mana-Bedarf. Die Registry und `build_id` im API-Vertrag sind
-für weitere Builds vorbereitet.
+Standard ist `deadrabb1t-chaos-dot-lich-starter-v2`: **ED Contagion Chaos DoT Lich
+Starter** von DEADRABB1T, Mobalytics-Variante `default-variant`. Der versionierte Kontext
+enthält Essence Drain, Contagion, Dark Effigy und Despair sowie explizite offensive,
+defensive und slotbezogene Item-Prioritäten. Die v1-Build-ID bleibt für bestehende Clients
+und gespeicherte Vergleiche verfügbar. Weitere Builds können automatisch aus öffentlichen
+Build-Links analysiert, als Vorschau geprüft und anschließend versioniert gespeichert werden.
 
 Quelle: https://mobalytics.gg/poe-2/builds/chaos-dot-lich-starter-deadrabbit?ws-ngf5-f7d82102-7e77-4a44-ad24-33b67e8ae7bf=activeVariantId%2Cdefault-variant
 
@@ -28,7 +27,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Frontend: `http://localhost:8000`, API-Dokumentation: `http://localhost:8000/docs`.
+Frontend: `http://localhost:8080`, API-Dokumentation: `http://localhost:8080/docs`.
 
 Ohne Docker:
 
@@ -42,28 +41,56 @@ cd frontend && npm install && npm run dev
 
 ## Aktiver API-Vertrag
 
+### Eigene Builds aus Links
+
+Im Build-Bereich kann eine öffentliche `http(s)`-URL analysiert werden. Der Server lädt die
+URL nicht selbst, sondern übergibt sie der OpenAI Responses API mit Websuche und einem strikten
+Ausgabeschema. Private IP-Adressen, localhost, Zugangsdaten und URL-Fragmente werden abgewiesen.
+Ergebnisfelder und die tatsächlich vom Provider gelieferten URL-Zitate erscheinen zuerst als
+Vorschau. Erst die Bestätigung speichert exakt diese Vorschau als versionierten Custom-Build.
+Custom-Builds und die aktive Auswahl bleiben in der Datenbank erhalten.
+
+- `POST /api/builds/previews` analysiert `{ "source_url": "…" }`.
+- `POST /api/builds/previews/{id}/confirm` bestätigt eine gültige Vorschau idempotent.
+- `GET /api/builds` liefert eingebaute und eigene Builds weiterhin als Liste.
+- `GET /api/builds/active` und `PUT /api/builds/active` verwalten die aktive Auswahl.
+
+Die Build-Analyse benötigt wie die Itembewertung einen konfigurierten `OPENAI_API_KEY`.
+Die OpenAI-Websuche muss mindestens eine überprüfbare URL-Zitation liefern; ohne Zitation
+wird keine Vorschau angeboten.
+
 `POST /api/items/evaluate` verlangt `raw_text`, `target_slot` und akzeptiert `build_id`.
 Der Provider erhält Candidate, das exakt im Zielslot ausgerüstete Item, den Zielslot,
 beobachtete Profilwerte und den vollständigen versionierten Build-Kontext.
 Ist der Zielslot leer, endet der Request vor dem Provideraufruf mit HTTP 422.
-Das strukturierte Ergebnis enthält ausschließlich `recommendation` (`better`,
-`not_better`, `uncertain`), `confidence`, `reasons` und `warnings`.
+Das strukturierte Ergebnis enthält die kompatible `recommendation` (`better`,
+`not_better`, `uncertain`) plus Urteil (`upgrade`, `sidegrade`, `downgrade`), Itemnamen,
+begrenzte Gewinne und Verluste, vier Build-Auswirkungen und eine klare Empfehlung.
+Der v2-Build mit expliziten Item-Prioritäten ist Standard; die v1-Build-ID bleibt verfügbar.
+
+Die GUI erkennt aus der Itemklasse automatisch den Zielslot. Ringe verwenden den aktuell
+gewählten Ring-Slot, ein Staff wird gemeinsam mit Wand und Fokus verglichen. Der API-Endpunkt
+verlangt `target_slot` weiterhin explizit.
 
 Der Python-Parser kennzeichnet Eingaben mit `auto_format_status` als `unchanged`, `safe`
 oder `ambiguous`. Nur konservative, insert-only Vorschläge für einzeilige Normal-/Magic-
 Items werden nach erfolgreichem Identitäts-Reparse automatisch angewendet. Einzeilige
 Rare-/Unique-Items bleiben immer `ambiguous` und müssen manuell geprüft werden. Die UI zeigt
-eine sichere Änderung mit Undo auf den exakten Originaltext; mehrdeutige Vorschläge werden
-nie automatisch an den Provider gesendet oder als Equipment gespeichert.
+eine sichere Änderung als Hinweis; mehrdeutige Vorschläge werden nie automatisch an den
+Provider gesendet oder als Equipment gespeichert.
 
 `GET /api/builds` liefert die auswählbaren Build-Versionen. Profil- und Equipment-Endpunkte
 bleiben bestehen. Alte History-/Sale-Daten und Datenbankfelder werden aus
 Kompatibilitätsgründen nicht destruktiv migriert, gehören aber nicht mehr zum aktiven UI-
 oder Bewertungsflow.
 
-Die GUI kann vollständige Equipment-Snapshots mit `schema_version: 1` oder `2` atomar
-importieren. Nach einem erfolgreichen Vergleich ersetzt „Candidate ausrüsten“ das Item im
-exakt verglichenen Zielslot; das vorherige Item ist anschließend nicht mehr ausgerüstet.
+Die GUI kann vollständige Equipment-Snapshots mit `schema_version: 1` oder `2` sowie das
+strukturierte Slotformat mit `wand`, `focus`, `helmet`, `body_armour`, `gloves`, `boots`,
+`belt`, `ring1`, `ring2` und `amulet` atomar importieren. Importantwort und gespeicherter
+Serverzustand werden anschließend gegeneinander verifiziert. Charms im strukturierten Format
+werden erkannt, gehören aber noch nicht zu den unterstützten Equipment-Slots. Nach einem
+erfolgreichen Vergleich ersetzt „Candidate ausrüsten“ das Item im exakt verglichenen Slot;
+ein Staff belegt Wand und Fokus gemeinsam.
 
 ## Qualität
 

@@ -1,13 +1,30 @@
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 
-app = FastAPI(title="PoE 2 Gear & Trade Checker", version="0.1.0")
+app = FastAPI(title="PoE 2 Build Item Checker", version="0.1.0")
 app.include_router(router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if request.url.path == "/api/equipment/import":
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "code": "invalid_equipment_snapshot",
+                    "message": "Der Equipment-Snapshot ist unvollständig oder entspricht nicht dem unterstützten Schema.",
+                }
+            },
+        )
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.get("/api/{path:path}", include_in_schema=False)

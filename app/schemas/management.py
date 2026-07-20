@@ -46,6 +46,13 @@ class EquipmentPut(StrictModel):
     raw_text: str = Field(min_length=1, max_length=50_000)
 
 
+class EquipmentEquip(StrictModel):
+    """Equip an item according to its item class, including two-handed loadouts."""
+
+    raw_text: str = Field(min_length=1, max_length=50_000)
+    ring_slot: Literal["ring_1", "ring_2"] = "ring_1"
+
+
 class SeedProfile(StrictModel):
     name: str
     build_stage: str
@@ -87,4 +94,36 @@ class EquipmentExport(StrictModel):
         return self
 
 
-EquipmentImportData = EquipmentImport | EquipmentExport
+class StructuredEquipmentItem(StrictModel):
+    item_class: str = Field(min_length=1, max_length=100)
+    rarity: str = Field(min_length=1, max_length=30)
+    name: str = Field(min_length=1, max_length=200)
+    base: str = Field(min_length=1, max_length=200)
+    item_level: int | None = Field(default=None, ge=1, le=100)
+    energy_shield: int | None = Field(default=None, ge=0)
+    mods: list[str] = Field(min_length=1, max_length=100)
+
+
+class StructuredCharm(StrictModel):
+    rarity: str = Field(min_length=1, max_length=30)
+    name: str = Field(min_length=1, max_length=200)
+    base: str = Field(min_length=1, max_length=200)
+
+
+class StructuredEquipmentImport(StrictModel):
+    """Explicit schema for structured equipment snapshots without a schema version."""
+
+    wand: StructuredEquipmentItem
+    focus: StructuredEquipmentItem
+    helmet: StructuredEquipmentItem
+    body_armour: StructuredEquipmentItem
+    gloves: StructuredEquipmentItem
+    boots: StructuredEquipmentItem
+    belt: StructuredEquipmentItem
+    ring1: StructuredEquipmentItem
+    ring2: StructuredEquipmentItem
+    amulet: StructuredEquipmentItem
+    charms: list[StructuredCharm] = Field(default_factory=list, max_length=3)
+
+
+EquipmentImportData = EquipmentImport | EquipmentExport | StructuredEquipmentImport

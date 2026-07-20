@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     evaluation_max_input_chars: int = Field(default=20_000, ge=1_000, le=100_000)
     evaluation_max_output_tokens: int = Field(default=3_000, ge=100, le=10_000)
     evaluation_rate_limit_per_minute: int = Field(default=10, ge=1, le=120)
+    build_analysis_max_output_tokens: int = Field(default=4000, ge=500, le=10000)
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

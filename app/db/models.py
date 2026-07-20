@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -89,6 +89,51 @@ class EquipmentSlot(Base):
     character_id: Mapped[int] = mapped_column(ForeignKey("character_profiles.id"), primary_key=True)
     slot: Mapped[str] = mapped_column(String(30), primary_key=True)
     item_id: Mapped[str | None] = mapped_column(ForeignKey("items.id"), unique=True)
+
+
+class CustomBuild(Base):
+    __tablename__ = "custom_builds"
+    __table_args__ = (
+        UniqueConstraint("source_url", "fingerprint", name="uq_custom_build_source_fingerprint"),
+        UniqueConstraint("source_url", "version", name="uq_custom_build_source_version"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    build_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(200))
+    author: Mapped[str] = mapped_column(String(200), default="Unknown")
+    source_url: Mapped[str] = mapped_column(Text)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    source_variant: Mapped[str] = mapped_column(String(200), default="default")
+    archetype: Mapped[str] = mapped_column(Text)
+    core_skills: Mapped[list[str]] = mapped_column(JSON, default=list)
+    offensive_priorities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    defensive_priorities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    item_priorities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    low_value_stats: Mapped[list[str]] = mapped_column(JSON, default=list)
+    constraints: Mapped[list[str]] = mapped_column(JSON, default=list)
+    citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class BuildPreview(Base):
+    __tablename__ = "build_previews"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_url: Mapped[str] = mapped_column(Text)
+    analysis: Mapped[dict] = mapped_column(JSON)
+    citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    provider: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(100))
+    confirmed_build_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AppPreference(Base):
+    __tablename__ = "app_preferences"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
 
 
 class Evaluation(Base):

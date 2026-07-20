@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +23,11 @@ ROOT = Path(__file__).parents[1]
 
 def result() -> EvaluationResult:
     return EvaluationResult(
-        recommendation="better", confidence="high", reasons=["Relevant."], warnings=[]
+        recommendation="better", confidence="high", reasons=["Relevant."], warnings=[],
+        verdict="upgrade", current_item_name="Alt", new_item_name="Neu",
+        gains=["Mehr relevante Werte."], losses=[],
+        impacts={"damage": "better", "defensive": "similar", "resistances": "similar", "utility": "similar"},
+        clear_recommendation="Neues Item ausrüsten.",
     )
 
 
@@ -32,6 +37,8 @@ def result() -> EvaluationResult:
         "12 % mehr DPS.",
         "15% stärker als das ausgerüstete Item.",
         "15% better than equipped.",
+        "The item deals 20% more damage than equipped.",
+        "Das Item verursacht 20% mehr Schaden als das ausgerüstete Item.",
         "DPS improves by twelve percent.",
         "The gain is 15 percent compared with equipped.",
         "The gain is 15 percent.",
@@ -60,7 +67,7 @@ def result() -> EvaluationResult:
 )
 def test_result_rejects_out_of_scope_claims(claim: str) -> None:
     with pytest.raises(ValidationError):
-        EvaluationResult(recommendation="better", confidence="high", reasons=[claim], warnings=[])
+        EvaluationResult(recommendation="better", confidence="high", reasons=[claim], warnings=[], verdict="upgrade", current_item_name="Alt", new_item_name="Neu", gains=[], losses=[], impacts={"damage":"better","defensive":"similar","resistances":"similar","utility":"similar"}, clear_recommendation="Ausrüsten.")
 
 
 @pytest.mark.parametrize(
@@ -72,6 +79,10 @@ def test_result_rejects_out_of_scope_claims(claim: str) -> None:
         "The item has 10% less damage taken.",
         "Der Ring liefert 30% Lightning Resistance.",
         "Der Modifier gibt 20% chance for ES Recharge.",
+        "Gewinn: 44% of Damage as Extra Lightning Damage gegenüber dem ausgerüsteten Item.",
+        "Verlust: Das alte Item liefert 30% Lightning Resistance.",
+        "Das neue Item mit 26% increased Cast Speed ausrüsten.",
+        "Direkter Trade-off: 20% Cast Speed statt 30% Lightning Resistance.",
         "Trade-off: mehr Energy Shield, aber keine Mana-Regeneration.",
         "The item has a crafted modifier granting Cast Speed.",
         "Der gecraftete Modifier gewährt Cast Speed.",
@@ -84,8 +95,59 @@ def test_result_allows_observed_facts_and_tradeoffs(claim: str) -> None:
         confidence="high",
         reasons=[claim],
         warnings=[],
+        verdict="upgrade", current_item_name="Alt", new_item_name="Neu", gains=[], losses=[],
+        impacts={"damage":"better","defensive":"similar","resistances":"similar","utility":"similar"},
+        clear_recommendation="Ausrüsten.",
     )
     assert value.recommendation == "better"
+
+
+@pytest.mark.parametrize(
+    ("field", "claim"),
+    [
+        ("gains", "Gewinn: 26% increased Cast Speed statt 15% auf dem alten Item."),
+        ("losses", "Verlust: 30% Lightning Resistance vom alten Ring."),
+        ("clear_recommendation", "Wegen 26% Cast Speed trotz Resistenzverlust ausrüsten."),
+    ],
+)
+def test_result_allows_observed_percent_tradeoffs_in_rich_fields(field: str, claim: str) -> None:
+    data = result().model_dump()
+    data[field] = claim if field == "clear_recommendation" else [claim]
+    assert EvaluationResult.model_validate(data).recommendation == "better"
+
+
+def test_result_requires_consistent_verdict() -> None:
+    data = result().model_dump()
+    data["verdict"] = "downgrade"
+    with pytest.raises(ValidationError, match="verdict must match recommendation"):
+        EvaluationResult.model_validate(data)
+
+
+def test_new_free_text_fields_receive_compliance_validation() -> None:
+    data = result().model_dump()
+    data["clear_recommendation"] = "Dieses Item für ein Divine verkaufen."
+    with pytest.raises(ValidationError, match="Marktwertaussagen"):
+        EvaluationResult.model_validate(data)
+
+
+@pytest.mark.parametrize("field", ["reasons", "warnings", "gains", "losses"])
+def test_explanation_entries_are_bounded(field: str) -> None:
+    data = result().model_dump()
+    data[field] = ["x" * 501]
+    with pytest.raises(ValidationError, match="at most 500 characters"):
+        EvaluationResult.model_validate(data)
+
+
+def test_evaluation_input_rejects_inconsistent_slot_context() -> None:
+    from app.builds.registry import DEFAULT_BUILD_ID, get_build
+    from app.parser.service import parse_with_warnings
+
+    item = parse_with_warnings((ROOT / "tests/fixtures/rare_wand.txt").read_text()).item
+    with pytest.raises(ValidationError, match="equipped_slots must exactly match target_slots"):
+        EvaluationInput(
+            candidate=item, equipped=item, target_slot="wand", target_slots=["wand"],
+            equipped_slots={"focus": item}, observed_profile=None, build=get_build(DEFAULT_BUILD_ID),
+        )
 
 
 class FakeProvider:
@@ -158,6 +220,41 @@ async def test_evaluate_sends_complete_comparison_context(
 
 
 @pytest.mark.anyio
+async def test_collapsed_quoted_staff_compares_both_hand_slots(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = FakeProvider()
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    seed = json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())
+    with isolated_db() as db:
+        replace_equipment(db, "wand", seed["equipment_raw_text"]["wand"])
+        replace_equipment(db, "focus", seed["equipment_raw_text"]["focus"])
+    collapsed = (
+        '"Item Class: Staves Rarity: Magic Vorpal Ashen Staff of Siphoning -------- '
+        'Requires: Level 44 -------- Item Level: 66 -------- Grants Skill: Level 14 Firebolt '
+        '-------- { Prefix Modifier "Vorpal" (Tier: 3) — Damage, Elemental, Lightning } '
+        'Gain 44(43-48)% of Damage as Extra Lightning Damage '
+        '{ Suffix Modifier "of Siphoning" (Tier: 3) — Mana } '
+        'Gain 23(21-27) Mana per enemy killed"'
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        parsed = await client.post("/api/items/parse", json={"raw_text": collapsed})
+        assert parsed.json()["auto_format_status"] == "safe"
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": collapsed, "target_slot": "wand"}
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["parse"]["item"]["item_class"] == "Staves"
+    assert body["target_slots"] == ["wand", "focus"]
+    assert set(provider.received.equipped_slots) == {"wand", "focus"}
+    assert provider.received.equipped_slots["wand"] is not None
+    assert provider.received.equipped_slots["focus"] is not None
+
+
+@pytest.mark.anyio
 async def test_provider_failure_has_no_local_recommendation(
     monkeypatch: pytest.MonkeyPatch,
     isolated_db: sessionmaker[Session],
@@ -210,10 +307,47 @@ async def test_openai_provider_uses_structured_comparison() -> None:
     assert kwargs["text_format"] is EvaluationResult
     assert kwargs["store"] is False
     content = kwargs["input"][0]["content"]
-    assert '"candidate"' in content and '"equipped"' in content and '"build"' in content
+    comparison = json.loads(content)["comparison"]
+    assert "candidate" in comparison and "equipped_slots" in comparison and "build" in comparison
+    assert "equipped" not in comparison
     assert '"raw_text"' not in content
     assert '"unknown_lines"' not in content
     assert '"notes"' not in content
+
+
+@pytest.mark.anyio
+async def test_staff_provider_payload_uses_only_sanitized_canonical_slots() -> None:
+    from app.builds.registry import DEFAULT_BUILD_ID, get_build
+    from app.parser.service import parse_with_warnings
+
+    item = parse_with_warnings((ROOT / "tests/fixtures/rare_wand.txt").read_text()).item
+    data = EvaluationInput(
+        candidate=item,
+        equipped=item,
+        equipped_slots={"wand": item, "focus": item},
+        target_slot="wand",
+        target_slots=["wand", "focus"],
+        observed_profile=None,
+        build=get_build(DEFAULT_BUILD_ID),
+    )
+    parse = pytest.importorskip("unittest.mock").AsyncMock(
+        return_value=SimpleNamespace(output_parsed=result(), output=[], usage=None)
+    )
+    provider = OpenAIEvaluationProvider(
+        api_key="x", model="mock", reasoning_effort="medium", timeout=1,
+        max_retries=0, max_input_chars=50_000, max_output_tokens=100,
+        rate_limit_per_minute=2,
+        client=SimpleNamespace(responses=SimpleNamespace(parse=parse)),
+    )
+    await provider.evaluate(data)
+    comparison = json.loads(parse.await_args.kwargs["input"][0]["content"])["comparison"]
+    assert comparison["target_slots"] == ["wand", "focus"]
+    assert set(comparison["equipped_slots"]) == {"wand", "focus"}
+    assert "equipped" not in comparison
+    for slot_item in comparison["equipped_slots"].values():
+        assert slot_item is not None
+        assert "raw_text" not in slot_item
+        assert "unknown_lines" not in slot_item
 
 
 @pytest.mark.anyio
@@ -276,6 +410,10 @@ async def test_sdk_validation_error_is_normalized_without_log_leakage(
                 "confidence": "high",
                 "reasons": [f"{marker}: 12% mehr DPS"],
                 "warnings": [],
+                "verdict": "upgrade", "current_item_name": "Alt", "new_item_name": "Neu",
+                "gains": [], "losses": [],
+                "impacts": {"damage":"better","defensive":"similar","resistances":"similar","utility":"similar"},
+                "clear_recommendation": "Ausrüsten.",
             }
         )
     except ValidationError as validation_error:
@@ -340,6 +478,7 @@ async def test_target_slot_and_build_are_required_and_valid() -> None:
         builds = await client.get("/api/builds")
     assert response.status_code == 422
     assert builds.json()[0]["build_id"] == "deadrabb1t-chaos-dot-lich-starter-v1"
+    assert any(build["build_id"].endswith("-v2") for build in builds.json())
 
 
 @pytest.mark.anyio

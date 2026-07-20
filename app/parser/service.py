@@ -30,6 +30,10 @@ def _unknown_locations(raw_text: str, unknown_lines: list[str]) -> tuple[list[in
 
 def parse_with_warnings(raw_text: str) -> ParseItemResponse:
     """Parse item text and derive deterministic, presentation-safe diagnostics."""
+    # Chat and JSON copies sometimes retain one pair of presentation quotes. They
+    # cannot be part of a PoE item export and are safe to remove as a pair.
+    if len(raw_text) >= 2 and raw_text.startswith('"') and raw_text.endswith('"'):
+        raw_text = raw_text[1:-1]
     warnings: list[ParseWarning] = []
     collapsed = len(raw_text.splitlines()) == 1 and (
         "--------" in raw_text or "Item Class:" in raw_text or "Rarity:" in raw_text
