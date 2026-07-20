@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ SOURCE = "https://mobalytics.gg/poe-2/builds/chaos-dot-lich-starter-deadrabbit?w
 
 def migrate(database: Path, revision: str) -> None:
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{database}"}
-    subprocess.run([str(ROOT / ".venv/bin/alembic"), "upgrade" if revision != "0005-down" else "downgrade", "0005" if revision == "0005-down" else revision], cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade" if revision != "0005-down" else "downgrade", "0005" if revision == "0005-down" else revision], cwd=ROOT, env=env, check=True, capture_output=True, text=True)
 
 
 def insert_legacy_build(connection: sqlite3.Connection) -> None:
