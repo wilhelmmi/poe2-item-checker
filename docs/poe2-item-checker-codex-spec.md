@@ -1,5 +1,10 @@
 # PoE 2 Item Checker – vollständiges Codex-Briefing
 
+> **Historischer Entwurf:** Dieses Dokument beschreibt den ursprünglichen Produktumfang und
+> ist nicht der aktive API-Vertrag. Maßgeblich sind [README.md](../README.md) und
+> [PROJECT_STATUS.md](PROJECT_STATUS.md). Insbesondere History-, Sale-, Marktwert- und alte
+> lokale Check-Flows gehören nicht mehr zum aktiven Produkt.
+
 ## 1. Gesamtbewertung des bisherigen Konzepts
 
 Das Vorhaben lohnt sich als kleine, selbst gehostete Web-App. Der Nutzen ist klar:

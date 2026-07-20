@@ -1,7 +1,7 @@
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic_core import PydanticCustomError
 
 from app.builds.registry import BuildContext, DEFAULT_BUILD_ID
@@ -14,22 +14,46 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class BuildImpacts(StrictModel):
+    damage: Literal["better", "similar", "worse"]
+    defensive: Literal["better", "similar", "worse"]
+    resistances: Literal["better", "similar", "worse"]
+    utility: Literal["better", "similar", "worse"]
+
+
+BoundedExplanation = Annotated[str, StringConstraints(min_length=1, max_length=500)]
+
+
 class EvaluationResult(StrictModel):
     recommendation: Literal["better", "not_better", "uncertain"]
     confidence: Literal["low", "medium", "high"]
-    reasons: list[str] = Field(min_length=1, max_length=8)
-    warnings: list[str] = Field(default_factory=list, max_length=8)
+    reasons: list[BoundedExplanation] = Field(min_length=1, max_length=8)
+    warnings: list[BoundedExplanation] = Field(default_factory=list, max_length=8)
+    verdict: Literal["upgrade", "sidegrade", "downgrade"]
+    current_item_name: str = Field(min_length=1, max_length=200)
+    new_item_name: str = Field(min_length=1, max_length=200)
+    gains: list[BoundedExplanation] = Field(default_factory=list, max_length=8)
+    losses: list[BoundedExplanation] = Field(default_factory=list, max_length=8)
+    impacts: BuildImpacts
+    clear_recommendation: str = Field(min_length=1, max_length=500)
 
     @model_validator(mode="after")
     def reject_out_of_scope_claims(self) -> "EvaluationResult":
-        text = "\n".join([*self.reasons, *self.warnings])
+        expected = {"better": "upgrade", "not_better": "downgrade", "uncertain": "sidegrade"}
+        if self.verdict != expected[self.recommendation]:
+            raise ValueError("verdict must match recommendation")
+        text = "\n".join([*self.reasons, *self.warnings, *self.gains, *self.losses, self.clear_recommendation])
         percent = r"(?:\d+(?:[.,]\d+)?\s*(?:%|percent|prozent)|\w+\s+(?:percent|prozent))"
         relative_performance = (
-            percent + r"[^.\n]{0,64}\b(?:dps|than|gegenüber|compared|equipped|ausgerüstet)\b",
-            r"\b(?:dps|than|gegenüber|compared|equipped|ausgerüstet)\b[^.\n]{0,64}" + percent,
+            percent + r"[^.\n]{0,32}\b(?:dps|damage output|gesamt(?:schaden|leistung))\b",
+            r"\b(?:dps|damage output|gesamt(?:schaden|leistung))\b[^.\n]{0,32}" + percent,
             percent + r"[^.\n]{0,32}\b(?:stärker|schwächer|besser|schlechter)\b[^.\n]{0,16}\bals\b",
-            percent + r"[^.\n]{0,32}\b(?:gain|improvement|performance|leistungsgewinn|steigerung)\b",
-            r"\b(?:gain|improvement|performance|leistungsgewinn|steigerung)\b[^.\n]{0,32}" + percent,
+            percent + r"[^.\n]{0,32}\b(?:stronger|weaker|better|worse)\b[^.\n]{0,16}\bthan\b",
+            percent + r"[^.\n]{0,16}\b(?:more|less)\s+(?:damage|dps)\b[^.\n]{0,16}\bthan\b",
+            percent + r"[^.\n]{0,16}\b(?:mehr|weniger)\s+(?:schaden|dps)\b[^.\n]{0,16}\bals\b",
+            percent + r"[^.\n]{0,24}\b(?:performance|leistungsgewinn|leistungssteigerung)\b",
+            r"\b(?:performance|leistungsgewinn|leistungssteigerung)\b[^.\n]{0,24}" + percent,
+            r"\b(?:gain|improvement|steigerung)\s+(?:is|of|by|beträgt)\s+" + percent,
             r"\b(?:score|punkte?differenz|dps[- ]?delta)\b",
         )
         if any(re.search(pattern, text, re.IGNORECASE) for pattern in relative_performance):
@@ -80,9 +104,28 @@ class EvaluationResult(StrictModel):
 class EvaluationInput(StrictModel):
     candidate: ParsedItem
     equipped: ParsedItem
+    equipped_slots: dict[Slot, ParsedItem | None] = Field(default_factory=dict)
     target_slot: Slot
+    target_slots: list[Slot] = Field(default_factory=list)
     observed_profile: ProfileData | None
     build: BuildContext
+
+    @model_validator(mode="after")
+    def populate_single_slot_compatibility_fields(self) -> "EvaluationInput":
+        if not self.target_slots:
+            self.target_slots = [self.target_slot]
+        if not self.equipped_slots:
+            self.equipped_slots = {self.target_slot: self.equipped}
+        if self.target_slot not in self.target_slots or len(set(self.target_slots)) != len(self.target_slots):
+            raise ValueError("target_slots must uniquely contain target_slot")
+        if set(self.equipped_slots) != set(self.target_slots):
+            raise ValueError("equipped_slots must exactly match target_slots")
+        alias = self.equipped_slots[self.target_slot]
+        if alias is None:
+            alias = next((item for item in self.equipped_slots.values() if item is not None), None)
+        if alias != self.equipped:
+            raise ValueError("equipped must match the canonical equipped_slots item")
+        return self
 
 
 class ProviderFailure(StrictModel):
@@ -101,6 +144,8 @@ class EvaluateItemResponse(StrictModel):
     build: BuildContext
     target_slot: Slot
     equipped: ParsedItem
+    equipped_slots: dict[Slot, ParsedItem | None]
+    target_slots: list[Slot]
     evaluation: EvaluationResult | None
     provider: str | None
     model: str | None

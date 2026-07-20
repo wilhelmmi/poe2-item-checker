@@ -16,6 +16,15 @@ from app.evaluation.provider import EvaluationProviderError
 from app.main import app
 
 ROOT = Path(__file__).parents[1]
+STAFF = (
+    "Item Class: Staves\nRarity: Magic\nVorpal Ashen Staff of Siphoning\n--------\n"
+    "Requires: Level 44\n--------\nItem Level: 66\n--------\n"
+    "Grants Skill: Level 14 Firebolt\n--------\n"
+    '{ Prefix Modifier "Vorpal" (Tier: 3) — Damage, Elemental, Lightning }\n'
+    "Gain 44(43-48)% of Damage as Extra Lightning Damage\n"
+    '{ Suffix Modifier "of Siphoning" (Tier: 3) — Mana }\n'
+    "Gain 23(21-27) Mana per enemy killed"
+)
 
 
 @pytest.fixture
@@ -99,6 +108,85 @@ async def test_equipment_replace_keeps_old_item_and_separates_rings(isolated_db)
 
 
 @pytest.mark.anyio
+async def test_staff_loadout_is_atomic_and_focus_removes_staff(isolated_db) -> None:
+    seed = json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.put("/api/equipment/wand", json={"raw_text": seed["equipment_raw_text"]["wand"]})
+        await client.put("/api/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]})
+        equipped = await client.post("/api/equipment/equip", json={"raw_text": STAFF})
+        assert equipped.status_code == 200, equipped.text
+        assert equipped.json()["slots"]["wand"]["item"]["item_class"] == "Staves"
+        assert equipped.json()["slots"]["focus"] is None
+
+        focus = await client.put(
+            "/api/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]}
+        )
+        assert focus.status_code == 200
+        slots = (await client.get("/api/equipment")).json()["slots"]
+        assert slots["wand"] is None
+        assert slots["focus"]["item"]["item_class"] == "Foci"
+
+
+@pytest.mark.anyio
+async def test_staff_export_and_import_use_wand_with_empty_focus(isolated_db) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.post("/api/equipment/equip", json={"raw_text": STAFF})
+        exported = (await client.get("/api/equipment/export")).json()
+        assert exported["equipment_raw_text"]["wand"] == STAFF
+        assert exported["equipment_raw_text"]["focus"] is None
+        assert (await client.post("/api/equipment/import", json=exported)).status_code == 200
+        conflicting = {
+            **exported,
+            "equipment_raw_text": {
+                **exported["equipment_raw_text"],
+                "focus": json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())["equipment_raw_text"]["focus"],
+            },
+        }
+        response = await client.post("/api/equipment/import", json=conflicting)
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == "two_handed_slot_conflict"
+
+
+@pytest.mark.anyio
+async def test_partial_v1_imports_preserve_two_handed_invariant_both_directions(
+    isolated_db,
+) -> None:
+    seed = json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())
+
+    def partial(slot: str, raw_text: str) -> dict:
+        return {
+            "schema_version": 1,
+            "profile": seed["profile"],
+            "equipment_raw_text": {slot: raw_text},
+        }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.put(
+            "/api/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]}
+        )
+        staff_import = await client.post(
+            "/api/equipment/import", json=partial("wand", STAFF)
+        )
+        assert staff_import.status_code == 200, staff_import.text
+        assert staff_import.json()["slots"]["wand"]["item"]["item_class"] == "Staves"
+        assert staff_import.json()["slots"]["focus"] is None
+
+        focus_import = await client.post(
+            "/api/equipment/import",
+            json=partial("focus", seed["equipment_raw_text"]["focus"]),
+        )
+        assert focus_import.status_code == 200, focus_import.text
+        assert focus_import.json()["slots"]["wand"] is None
+        assert focus_import.json()["slots"]["focus"]["item"]["item_class"] == "Foci"
+
+
+@pytest.mark.anyio
 async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> None:
     seed = json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())
     async with httpx.AsyncClient(
@@ -120,6 +208,16 @@ async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> N
         partial_v2 = {**exported, "equipment_raw_text": {"wand": None}}
         rejected = await client.post("/api/equipment/import", json=partial_v2)
         assert rejected.status_code == 422
+        assert rejected.json() == {
+            "detail": {
+                "code": "invalid_equipment_snapshot",
+                "message": (
+                    "Der Equipment-Snapshot ist unvollständig oder entspricht nicht dem "
+                    "unterstützten Schema."
+                ),
+            }
+        }
+        assert seed["equipment_raw_text"]["wand"] not in rejected.text
         assert (await client.get("/api/equipment/export")).json()["equipment_raw_text"] == exported[
             "equipment_raw_text"
         ]
@@ -128,6 +226,68 @@ async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> N
         assert (await client.get("/api/equipment/export")).json()["equipment_raw_text"][
             "focus"
         ] is None
+
+
+@pytest.mark.anyio
+async def test_structured_docs_import_populates_equipment_used_by_evaluate(
+    isolated_db, monkeypatch
+) -> None:
+    def unavailable_provider():
+        raise EvaluationProviderError("provider_not_configured", "Nicht konfiguriert.")
+
+    monkeypatch.setattr(routes, "get_evaluation_provider", unavailable_provider)
+    snapshot = json.loads((ROOT / "tests/fixtures/structured_equipment.json").read_text())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        imported = await client.post("/api/equipment/import", json=snapshot)
+        assert imported.status_code == 200, imported.text
+        slots = imported.json()["slots"]
+        assert all(slots[slot] is not None for slot in slots)
+        assert slots["ring_1"]["item"]["name"] == "Skull Knot"
+        assert slots["ring_2"]["item"]["name"] == "Pandemonium Nail"
+        for source_slot, stored_slot in {
+            "wand": "wand",
+            "focus": "focus",
+            "helmet": "helmet",
+            "body_armour": "body_armour",
+            "gloves": "gloves",
+            "boots": "boots",
+            "belt": "belt",
+            "ring1": "ring_1",
+            "ring2": "ring_2",
+            "amulet": "amulet",
+        }.items():
+            assert len(slots[stored_slot]["item"]["modifiers"]) == len(
+                snapshot[source_slot]["mods"]
+            )
+
+        candidate = (
+            "Item Class: Wands\nRarity: Magic\nApt Attuned Wand\n--------\n"
+            "Item Level: 66\n--------\n+2 to Level of all Chaos Spell Skills"
+        )
+        evaluated = await client.post(
+            "/api/items/evaluate",
+            json={
+                "raw_text": candidate,
+                "target_slot": "wand",
+                "build_id": "deadrabb1t-chaos-dot-lich-starter-v1",
+            },
+        )
+        assert evaluated.status_code == 200, evaluated.text
+        assert evaluated.json()["equipped"]["name"] == "Bramble Needle"
+
+
+@pytest.mark.anyio
+async def test_structured_import_rejects_unknown_item_fields(isolated_db) -> None:
+    snapshot = json.loads((ROOT / "tests/fixtures/structured_equipment.json").read_text())
+    snapshot["wand"]["unmapped_stat"] = 42
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/api/equipment/import", json=snapshot)
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_equipment_snapshot"
 
 
 @pytest.mark.anyio

@@ -1,0 +1,160 @@
+{
+  "wand": {
+    "item_class": "Wands",
+    "rarity": "Rare",
+    "name": "Bramble Needle",
+    "base": "Withered Wand",
+    "item_level": 37,
+    "mods": [
+      "Grants Skill: Level 10 Chaos Bolt",
+      "25% increased Spell Damage (Rune)",
+      "30% increased Spell Damage",
+      "23% increased Spell Damage",
+      "+21 to maximum Mana",
+      "+1 to Level of all Chaos Spell Skills",
+      "11% increased Mana Regeneration Rate",
+      "Gain 2 Mana per Enemy Killed",
+      "Gain 20% of Damage as Extra Fire Damage"
+    ]
+  },
+  "focus": {
+    "item_class": "Foci",
+    "rarity": "Rare",
+    "name": "Empyrean Emblem",
+    "base": "Runed Focus",
+    "item_level": 67,
+    "energy_shield": 83,
+    "mods": [
+      "+18% to Fire Resistance (Rune)",
+      "17% increased Energy Shield",
+      "+9 to maximum Mana",
+      "80% increased Energy Shield",
+      "48% increased Spell Physical Damage",
+      "+30% to Lightning Resistance",
+      "+32% to Cold Resistance",
+      "26% increased Cast Speed"
+    ]
+  },
+  "body_armour": {
+    "item_class": "Body Armours",
+    "rarity": "Rare",
+    "name": "Viper Coat",
+    "base": "Vile Robe",
+    "item_level": 65,
+    "energy_shield": 206,
+    "mods": [
+      "+35 to maximum Energy Shield",
+      "+96 to maximum Life",
+      "8.7 Life Regeneration per second",
+      "+29% to Fire Resistance"
+    ]
+  },
+  "helmet": {
+    "item_class": "Helmets",
+    "rarity": "Rare",
+    "name": "Demon Horn",
+    "base": "Skycrown Tiara",
+    "item_level": 66,
+    "energy_shield": 280,
+    "mods": [
+      "75% increased Energy Shield",
+      "+70 to maximum Energy Shield",
+      "+28 to Intelligence",
+      "20% reduced Attribute Requirements",
+      "+22 to Accuracy Rating",
+      "10% increased Light Radius"
+    ]
+  },
+  "gloves": {
+    "item_class": "Gloves",
+    "rarity": "Unique",
+    "name": "Doedre's Tenure",
+    "base": "Stitched Gloves",
+    "mods": [
+      "100% increased Spell Damage",
+      "22% reduced Cast Speed",
+      "+13 to Intelligence"
+    ]
+  },
+  "boots": {
+    "item_class": "Boots",
+    "rarity": "Rare",
+    "name": "Nemesis Pace",
+    "base": "Elegant Slippers",
+    "energy_shield": 73,
+    "mods": [
+      "15% increased Movement Speed",
+      "+23 to maximum Mana",
+      "+12% to Cold Resistance",
+      "+19% to Lightning Resistance",
+      "+32% to Fire Resistance"
+    ]
+  },
+  "belt": {
+    "item_class": "Belts",
+    "rarity": "Rare",
+    "name": "Pain Harness",
+    "base": "Long Belt",
+    "mods": [
+      "2 Charm Slots",
+      "30% increased Charm Effect Duration",
+      "+58 to maximum Mana",
+      "+16% to Cold Resistance",
+      "+19% to Lightning Resistance"
+    ]
+  },
+  "amulet": {
+    "item_class": "Amulets",
+    "rarity": "Rare",
+    "name": "Skull Torc",
+    "base": "Stellar Amulet",
+    "mods": [
+      "+5 to all Attributes",
+      "31% increased Maximum Energy Shield",
+      "+35 Spirit",
+      "+19% to Cold Resistance",
+      "+20% to Fire Resistance",
+      "54% increased Mana Regeneration Rate"
+    ]
+  },
+  "ring1": {
+    "item_class": "Rings",
+    "rarity": "Rare",
+    "name": "Skull Knot",
+    "base": "Amethyst Ring",
+    "mods": [
+      "+8% to Chaos Resistance",
+      "5% increased Chaos Damage",
+      "+37 to maximum Life",
+      "+21% to Lightning Resistance",
+      "+5 Strength",
+      "Gain 28 Life per Enemy Killed"
+    ]
+  },
+  "ring2": {
+    "item_class": "Rings",
+    "rarity": "Rare",
+    "name": "Pandemonium Nail",
+    "base": "Topaz Ring",
+    "mods": [
+      "+27% to Lightning Resistance",
+      "+31 to Intelligence",
+      "57% increased Mana Regeneration Rate",
+      "9.4 Life Regeneration per second",
+      "27% increased Fire Damage",
+      "+185 Evasion Rating"
+    ]
+  },
+  "charms": [
+    {
+      "rarity": "Unique",
+      "name": "Sanguis Heroum",
+      "base": "Staunching Charm"
+    },
+    {
+      "rarity": "Unique",
+      "name": "Beira's Anguish",
+      "base": "Dousing Charm"
+    }
+  ]
+}

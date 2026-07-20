@@ -16,6 +16,8 @@ from app.schemas.management import (
     EquipmentResponse,
     ProfileData,
     Slot,
+    StructuredEquipmentImport,
+    StructuredEquipmentItem,
 )
 
 BLOCKING = {"input_missing_line_breaks", "missing_item_identity", "no_modifiers_detected"}
@@ -31,6 +33,14 @@ SLOT_CLASSES = {
     "ring_2": "Rings",
     "amulet": "Amulets",
 }
+
+
+def item_slots(item_class: str, ring_slot: Slot = "ring_1") -> tuple[Slot, ...]:
+    if item_class == "Staves":
+        return ("wand", "focus")
+    if item_class == "Rings":
+        return (ring_slot,)
+    return tuple(slot for slot, expected in SLOT_CLASSES.items() if expected == item_class)[:1]
 
 
 def get_or_create_profile(db: Session) -> CharacterProfile:
@@ -106,7 +116,9 @@ def equipment_response(db: Session) -> EquipmentResponse:
 
 def replace_equipment(db: Session, slot: Slot, raw_text: str) -> EquipmentItem:
     parsed = parse_equipment(raw_text, auto_format=True)
-    if parsed.item_class != SLOT_CLASSES[slot]:
+    if parsed.item_class == "Staves" and slot == "wand":
+        pass
+    elif parsed.item_class != SLOT_CLASSES[slot]:
         raise ValueError("item_slot_mismatch")
     get_or_create_profile(db)
     item = store_item(db, parsed)
@@ -116,20 +128,84 @@ def replace_equipment(db: Session, slot: Slot, raw_text: str) -> EquipmentItem:
         db.add(row)
     else:
         row.item_id = item.id
+    # A staff occupies both hand slots, represented canonically in wand. Equipping a
+    # focus removes an existing staff so no illegal staff+focus state can be committed.
+    conflicting_slot = "focus" if parsed.item_class == "Staves" else "wand" if slot == "focus" else None
+    if conflicting_slot:
+        conflict = db.get(EquipmentSlot, (1, conflicting_slot))
+        if parsed.item_class == "Staves" or (
+            conflict and conflict.item_id and item_schema(db.get(Item, conflict.item_id)).item_class == "Staves"
+        ):
+            if conflict is None:
+                db.add(EquipmentSlot(character_id=1, slot=conflicting_slot, item_id=None))
+            else:
+                conflict.item_id = None
     db.commit()
     return EquipmentItem(id=item.id, item=item_schema(item))
 
 
+def equip_loadout(db: Session, raw_text: str, ring_slot: Slot = "ring_1") -> EquipmentResponse:
+    parsed = parse_equipment(raw_text, auto_format=True)
+    targets = item_slots(parsed.item_class or "", ring_slot)
+    if not targets:
+        raise ValueError("unsupported_item_class")
+    replace_equipment(db, targets[0], parsed.raw_text)
+    return equipment_response(db)
+
+
+def structured_item_text(item: StructuredEquipmentItem) -> str:
+    lines = [
+        f"Item Class: {item.item_class}",
+        f"Rarity: {item.rarity}",
+        item.name,
+        item.base,
+        "--------",
+    ]
+    if item.energy_shield is not None:
+        lines.extend((f"Energy Shield: {item.energy_shield}", "--------"))
+    if item.item_level is not None:
+        lines.extend((f"Item Level: {item.item_level}", "--------"))
+    for modifier in item.mods:
+        lines.extend(("{ Prefix Modifier }", modifier))
+    return "\n".join(lines)
+
+
+def structured_equipment_text(data: StructuredEquipmentImport) -> dict[Slot, str]:
+    source = data.model_dump()
+    source["ring_1"] = source.pop("ring1")
+    source["ring_2"] = source.pop("ring2")
+    source.pop("charms")
+    return {
+        slot: structured_item_text(StructuredEquipmentItem.model_validate(source[slot]))
+        for slot in SLOTS
+    }
+
+
 def import_equipment(db: Session, data: EquipmentImportData) -> EquipmentResponse:
+    raw_text = (
+        structured_equipment_text(data)
+        if isinstance(data, StructuredEquipmentImport)
+        else data.equipment_raw_text
+    )
     parsed = {
         slot: parse_equipment(raw)
-        for slot, raw in data.equipment_raw_text.items()
+        for slot, raw in raw_text.items()
         if raw is not None
     }
-    if any(item.item_class != SLOT_CLASSES[slot] for slot, item in parsed.items()):
+    if any(
+        item.item_class != SLOT_CLASSES[slot]
+        and not (slot == "wand" and item.item_class == "Staves")
+        for slot, item in parsed.items()
+    ):
         raise ValueError("item_slot_mismatch")
+    imported_staff = parsed.get("wand") and parsed["wand"].item_class == "Staves"
+    imported_focus = parsed.get("focus") is not None
+    if imported_staff and imported_focus:
+        raise ValueError("two_handed_slot_conflict")
     profile = get_or_create_profile(db)
-    if data.schema_version == 1:
+    if isinstance(data, StructuredEquipmentImport):
+        pass
+    elif data.schema_version == 1:
         profile.name = data.profile.name
         profile.build_stage = data.profile.build_stage
         for key, value in data.profile.character_sheet.model_dump().items():
@@ -144,8 +220,23 @@ def import_equipment(db: Session, data: EquipmentImportData) -> EquipmentRespons
             db.add(EquipmentSlot(character_id=1, slot=slot, item_id=item.id))
         else:
             row.item_id = item.id
-    if data.schema_version == 2:
-        for slot, raw in data.equipment_raw_text.items():
+    # Partial v1 imports obey the same deterministic hand-slot semantics as
+    # individual equips: a newly imported staff clears focus; a newly imported
+    # focus clears an already equipped staff. A payload containing both conflicts
+    # and is rejected above rather than depending on mapping order.
+    if imported_staff:
+        focus_row = db.get(EquipmentSlot, (1, "focus"))
+        if focus_row is None:
+            db.add(EquipmentSlot(character_id=1, slot="focus", item_id=None))
+        else:
+            focus_row.item_id = None
+    elif imported_focus:
+        wand_row = db.get(EquipmentSlot, (1, "wand"))
+        wand_item = db.get(Item, wand_row.item_id) if wand_row and wand_row.item_id else None
+        if wand_item is not None and item_schema(wand_item).item_class == "Staves":
+            wand_row.item_id = None
+    if not isinstance(data, StructuredEquipmentImport) and data.schema_version == 2:
+        for slot, raw in raw_text.items():
             if raw is None:
                 row = db.get(EquipmentSlot, (1, slot))
                 if row is None:
