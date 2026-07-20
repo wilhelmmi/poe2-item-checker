@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -6,7 +8,8 @@ from app.evaluation.schemas import EvaluateItemRequest, EvaluateItemResponse, Ev
 from app.evaluation.service import get_evaluation_provider
 from app.builds.registry import BuildContext
 from app.builds.provider_service import get_build_provider
-from app.builds.schemas import ActiveBuild, BuildPreviewRequest, BuildPreviewResponse, DeletedBuild
+from app.builds.schemas import (ActiveBuild, BuildCitation, BuildPreviewRequest,
+                                BuildPreviewResponse, DeletedBuild)
 from app.builds.service import (canonicalize_source_url, confirm_preview, create_preview,
                                 delete_custom_build, get_active, get_any_build, list_all_builds,
                                 row_context, set_active)
@@ -44,6 +47,33 @@ from app.schemas.management import (
 )
 
 router = APIRouter(prefix="/api")
+
+
+def _citation_key(url: str) -> tuple[str, str, int | None, str, str]:
+    parsed = urlsplit(url)
+    scheme = parsed.scheme.lower()
+    port = parsed.port
+    if (scheme, port) in {("http", 80), ("https", 443)}:
+        port = None
+    return scheme, (parsed.hostname or "").lower(), port, parsed.path or "/", parsed.query
+
+
+def _include_source_citation(source_url: str,
+                             citations: list[BuildCitation]) -> list[BuildCitation]:
+    source = BuildCitation(url=source_url, title="Original-Build")
+    source_key = _citation_key(str(source.url))
+    safe_citations: list[BuildCitation] = []
+    for citation in citations:
+        citation_url = str(citation.url)
+        validation_url = urlsplit(citation_url)._replace(fragment="").geturl()
+        try:
+            canonicalize_source_url(validation_url)
+        except ValueError:
+            continue
+        safe_citations.append(citation)
+    if any(_citation_key(str(citation.url)) == source_key for citation in safe_citations):
+        return safe_citations
+    return [source, *safe_citations]
 
 
 async def database() -> Session:
@@ -99,6 +129,7 @@ async def analyze_build(data: BuildPreviewRequest, db: Session = Depends(databas
         analysis, citations = await provider.analyze(source_url)
     except EvaluationProviderError as exc:
         raise HTTPException(exc.status_code, detail={"code": exc.code, "message": exc.public_message}) from exc
+    citations = _include_source_citation(source_url, citations)
     preview = create_preview(db, source_url, analysis, citations, provider.name, provider.model)
     return BuildPreviewResponse(preview_id=preview.id, source_url=preview.source_url,
         analysis=analysis, citations=citations, provider=preview.provider, model=preview.model,

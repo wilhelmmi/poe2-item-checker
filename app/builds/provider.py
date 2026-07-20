@@ -76,9 +76,4 @@ class OpenAIBuildProvider:
                 "invalid_provider_response", "Der AI-Provider lieferte keine gültige Build-Analyse."
             ) from exc
         citations = extract_citations(response)
-        if not citations:
-            raise EvaluationProviderError(
-                "unverified_build_source",
-                "Die Build-Analyse enthielt keine überprüfbare Quellenangabe.",
-            )
         return analysis, citations

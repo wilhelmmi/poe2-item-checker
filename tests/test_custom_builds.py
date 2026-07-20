@@ -8,10 +8,11 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.routes import database
+import app.api.routes as routes
 import app.builds.service as build_service
 from app.builds.registry import DEFAULT_BUILD_ID, V1_BUILD_ID
-from app.builds.provider import extract_citations
-from app.builds.schemas import BuildAnalysis
+from app.builds.provider import OpenAIBuildProvider, extract_citations
+from app.builds.schemas import BuildAnalysis, BuildCitation
 from app.builds.service import (canonicalize_source_url, confirm_preview, create_preview,
                                 delete_custom_build, get_active, get_any_build, list_all_builds,
                                 set_active)
@@ -58,6 +59,113 @@ def test_citations_only_come_from_url_citation_annotations() -> None:
     ]
     response = SimpleNamespace(output=[SimpleNamespace(content=[SimpleNamespace(annotations=annotations)])])
     assert [str(item.url) for item in extract_citations(response)] == ["https://guide.example.com/build"]
+
+
+def test_source_citation_deduplication_is_semantic_and_preserves_provider_title() -> None:
+    provider_citations = [
+        BuildCitation(url="https://EXAMPLE.com:443/build#section", title="Guide-Titel"),
+        BuildCitation(url="https://example.com/build?variant=two", title="Andere Variante"),
+    ]
+
+    citations = routes._include_source_citation("https://example.com/build", provider_citations)
+
+    assert citations == provider_citations
+    assert citations[0].title == "Guide-Titel"
+    assert str(citations[1].url) == "https://example.com/build?variant=two"
+
+
+def test_source_citation_keeps_distinct_query_urls() -> None:
+    provider_citations = [
+        BuildCitation(url="https://example.com/build?variant=two", title="Andere Variante"),
+    ]
+
+    citations = routes._include_source_citation(
+        "https://example.com/build?variant=one", provider_citations)
+
+    assert [str(item.url) for item in citations] == [
+        "https://example.com/build?variant=one",
+        "https://example.com/build?variant=two",
+    ]
+
+
+def test_unsafe_provider_citations_cannot_replace_source_fallback() -> None:
+    provider_citations = [
+        BuildCitation(url="https://attacker@example.com/build", title="Userinfo"),
+        BuildCitation(url="http://127.0.0.1/build", title="Private host"),
+    ]
+
+    citations = routes._include_source_citation(
+        "https://example.com/build", provider_citations)
+
+    assert [(str(item.url), item.title) for item in citations] == [
+        ("https://example.com/build", "Original-Build"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_provider_accepts_analysis_without_search_annotations() -> None:
+    response = SimpleNamespace(output_parsed=analysis(), output=[])
+    client = SimpleNamespace(responses=SimpleNamespace(
+        parse=lambda **_kwargs: _async_result(response)))
+    provider = OpenAIBuildProvider(api_key="test", model="test", timeout=1,
+        max_retries=0, max_output_tokens=1000, rate_limit_per_minute=60, client=client)
+
+    parsed, citations = await provider.analyze("https://mobalytics.gg/poe-2/builds/test")
+
+    assert parsed.name == "Chaos Lich"
+    assert citations == []
+
+
+async def _async_result(value):
+    return value
+
+
+@pytest.mark.anyio
+async def test_build_preview_uses_canonical_source_as_fallback_and_deduplicates(
+        tmp_path, monkeypatch) -> None:
+    requested_url = (
+        "https://mobalytics.gg/poe-2/builds/chaos-dot-lich-starter-deadrabbit?"
+        "ws-ngf5-f7d82102-7e77-4a44-ad24-33b67e8ae7bf=activeVariantId%2Cdefault-variant"
+    )
+    provider = SimpleNamespace(name="openai", model="test")
+    provider.analyze = _async_result_for_url(analysis(), [])
+    monkeypatch.setattr(routes, "get_build_provider", lambda: provider)
+    engine = create_engine(f"sqlite:///{tmp_path / 'build-preview.db'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine, expire_on_commit=False)
+
+    async def override():
+        with factory() as session:
+            yield session
+
+    app.dependency_overrides[database] = override
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as client:
+            fallback = await client.post("/api/builds/previews", json={"source_url": requested_url})
+        assert fallback.status_code == 200
+        assert fallback.json()["citations"] == [{"url": requested_url, "title": "Original-Build"}]
+
+        provider.analyze = _async_result_for_url(analysis(), [
+            BuildCitation(url=requested_url, title="Mobalytics"),
+            BuildCitation(url="https://example.com/secondary", title="Sekundärquelle"),
+        ])
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as client:
+            cited = await client.post("/api/builds/previews", json={"source_url": requested_url})
+        assert cited.status_code == 200
+        assert [item["url"] for item in cited.json()["citations"]] == [
+            requested_url, "https://example.com/secondary",
+        ]
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def _async_result_for_url(result, citations):
+    async def analyze(_source_url):
+        return result, citations
+    return analyze
 
 
 def test_preview_confirmation_is_persistent_idempotent_and_activatable() -> None:
