@@ -47,13 +47,15 @@ Im Build-Bereich kann eine öffentliche `http(s)`-URL analysiert werden. Der Ser
 URL nicht selbst, sondern übergibt sie der OpenAI Responses API mit Websuche und einem strikten
 Ausgabeschema. Private IP-Adressen, localhost, Zugangsdaten und URL-Fragmente werden abgewiesen.
 Ergebnisfelder und die tatsächlich vom Provider gelieferten URL-Zitate erscheinen zuerst als
-Vorschau. Erst die Bestätigung speichert exakt diese Vorschau als versionierten Custom-Build.
-Custom-Builds und die aktive Auswahl bleiben in der Datenbank erhalten.
+Vorschau. Erst die Bestätigung speichert exakt diese Vorschau als versionierten Build.
+Alle Builds – auch die beiden mitgelieferten – sind datenbankbasiert und löschbar. Wird der
+letzte Build gelöscht, bleibt die Auswahl leer, bis wieder eine Vorschau bestätigt wird.
 
 - `POST /api/builds/previews` analysiert `{ "source_url": "…" }`.
 - `POST /api/builds/previews/{id}/confirm` bestätigt eine gültige Vorschau idempotent.
 - `GET /api/builds` liefert eingebaute und eigene Builds weiterhin als Liste.
 - `GET /api/builds/active` und `PUT /api/builds/active` verwalten die aktive Auswahl.
+- `DELETE /api/builds/{build_id}` löscht den Build samt zugeordnetem Equipment.
 
 Die Build-Analyse benötigt wie die Itembewertung einen konfigurierten `OPENAI_API_KEY`.
 Die OpenAI-Websuche muss mindestens eine überprüfbare URL-Zitation liefern; ohne Zitation
@@ -79,8 +81,13 @@ Rare-/Unique-Items bleiben immer `ambiguous` und müssen manuell geprüft werden
 eine sichere Änderung als Hinweis; mehrdeutige Vorschläge werden nie automatisch an den
 Provider gesendet oder als Equipment gespeichert.
 
-`GET /api/builds` liefert die auswählbaren Build-Versionen. Profil- und Equipment-Endpunkte
-bleiben bestehen. Alte History-/Sale-Daten und Datenbankfelder werden aus
+`GET /api/builds` liefert die auswählbaren Build-Versionen. Equipment wird strikt je Build
+unter `/api/builds/{build_id}/equipment` verwaltet; Import, Export und Ausrüsten verwenden
+dieselbe Basis-URL. Alte Exporte bleiben beim Import kompatibel und werden dem ausgewählten
+Build zugeordnet. Profilwerte und bestehende History-/Sale-Daten bleiben vorerst global. Die
+Legacy-Backupfunktion arbeitet nur mit dem aktiven Build und verweigert Restore bei Equipment
+weiterer Builds, damit kein fremdes Loadout überschrieben wird. Alte
+History-/Sale-Daten und Datenbankfelder werden aus
 Kompatibilitätsgründen nicht destruktiv migriert, gehören aber nicht mehr zum aktiven UI-
 oder Bewertungsflow.
 

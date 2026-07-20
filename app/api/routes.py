@@ -6,9 +6,10 @@ from app.evaluation.schemas import EvaluateItemRequest, EvaluateItemResponse, Ev
 from app.evaluation.service import get_evaluation_provider
 from app.builds.registry import BuildContext
 from app.builds.provider_service import get_build_provider
-from app.builds.schemas import ActiveBuild, BuildPreviewRequest, BuildPreviewResponse
+from app.builds.schemas import ActiveBuild, BuildPreviewRequest, BuildPreviewResponse, DeletedBuild
 from app.builds.service import (canonicalize_source_url, confirm_preview, create_preview,
-                                get_active, get_any_build, list_all_builds, row_context, set_active)
+                                delete_custom_build, get_active, get_any_build, list_all_builds,
+                                row_context, set_active)
 from app.db.session import SessionLocal
 from app.db.models import CharacterProfile, EquipmentSlot, Item
 from app.equipment.service import (
@@ -70,10 +71,21 @@ async def active_build(db: Session = Depends(database)) -> ActiveBuild:
 
 @router.put("/builds/active", response_model=ActiveBuild)
 async def update_active_build(data: ActiveBuild, db: Session = Depends(database)) -> ActiveBuild:
+    if data.build_id is None:
+        raise HTTPException(422, detail={"code": "unknown_build", "message": "Der Build ist nicht verfügbar."})
     try:
         return ActiveBuild(build_id=set_active(db, data.build_id))
     except ValueError as exc:
         raise HTTPException(422, detail={"code": "unknown_build", "message": "Der Build ist nicht verfügbar."}) from exc
+
+
+@router.delete("/builds/{build_id}", response_model=DeletedBuild)
+async def delete_build(build_id: str, db: Session = Depends(database)) -> DeletedBuild:
+    try:
+        active_build_id = delete_custom_build(db, build_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail={"code": "unknown_build", "message": "Der Build ist nicht verfügbar."}) from exc
+    return DeletedBuild(deleted_build_id=build_id, active_build_id=active_build_id)
 
 
 @router.post("/builds/previews", response_model=BuildPreviewResponse)
@@ -115,37 +127,48 @@ async def update_profile(data: ProfileData, db: Session = Depends(database)) -> 
     return put_profile(db, data)
 
 
-@router.get("/equipment", response_model=EquipmentResponse)
-async def get_equipment(db: Session = Depends(database)) -> EquipmentResponse:
-    return equipment_response(db)
+def require_build(db: Session, build_id: str) -> None:
+    try:
+        get_any_build(db, build_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail={"code": "unknown_build", "message": "Der Build ist nicht verfügbar."}) from exc
 
 
-@router.put("/equipment/{slot}", response_model=EquipmentItem)
+@router.get("/builds/{build_id}/equipment", response_model=EquipmentResponse)
+async def get_equipment(build_id: str, db: Session = Depends(database)) -> EquipmentResponse:
+    require_build(db, build_id)
+    return equipment_response(db, build_id)
+
+
+@router.put("/builds/{build_id}/equipment/{slot}", response_model=EquipmentItem)
 async def put_equipment(
-    slot: Slot, data: EquipmentPut, db: Session = Depends(database)
+    build_id: str, slot: Slot, data: EquipmentPut, db: Session = Depends(database)
 ) -> EquipmentItem:
     try:
-        return replace_equipment(db, slot, data.raw_text)
+        require_build(db, build_id)
+        return replace_equipment(db, slot, data.raw_text, build_id)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
 
 
-@router.post("/equipment/equip", response_model=EquipmentResponse)
-async def equip_item(data: EquipmentEquip, db: Session = Depends(database)) -> EquipmentResponse:
+@router.post("/builds/{build_id}/equipment/equip", response_model=EquipmentResponse)
+async def equip_item(build_id: str, data: EquipmentEquip, db: Session = Depends(database)) -> EquipmentResponse:
     try:
-        return equip_loadout(db, data.raw_text, data.ring_slot)
+        require_build(db, build_id)
+        return equip_loadout(db, data.raw_text, data.ring_slot, build_id)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
 
 
-@router.post("/equipment/import", response_model=EquipmentResponse)
+@router.post("/builds/{build_id}/equipment/import", response_model=EquipmentResponse)
 async def import_equipment_seed(
-    data: EquipmentImportData, db: Session = Depends(database)
+    build_id: str, data: EquipmentImportData, db: Session = Depends(database)
 ) -> EquipmentResponse:
     try:
-        return import_equipment(db, data)
+        require_build(db, build_id)
+        return import_equipment(db, data, build_id)
     except ValueError as exc:
         db.rollback()
         code = str(exc)
@@ -161,9 +184,10 @@ async def import_equipment_seed(
         ) from exc
 
 
-@router.get("/equipment/export", response_model=EquipmentExport)
-async def get_equipment_export(db: Session = Depends(database)) -> EquipmentExport:
-    return export_equipment(db)
+@router.get("/builds/{build_id}/equipment/export", response_model=EquipmentExport)
+async def get_equipment_export(build_id: str, db: Session = Depends(database)) -> EquipmentExport:
+    require_build(db, build_id)
+    return export_equipment(db, build_id)
 
 
 @router.post("/items/parse", response_model=ParseItemResponse)
@@ -220,7 +244,7 @@ async def evaluate_item(
     target_slots: list[Slot] = ["wand", "focus"] if is_staff else [request.target_slot]
     equipped_slots: dict[Slot, ParsedItem | None] = {}
     for target in target_slots:
-        row = db.get(EquipmentSlot, (1, target))
+        row = db.get(EquipmentSlot, (1, request.build_id, target))
         equipped_orm = db.get(Item, row.item_id) if row and row.item_id else None
         equipped_slots[target] = item_schema(equipped_orm) if equipped_orm else None
     equipped = equipped_slots[request.target_slot]

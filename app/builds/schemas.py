@@ -44,4 +44,9 @@ class BuildPreviewResponse(StrictModel):
 
 
 class ActiveBuild(StrictModel):
-    build_id: str = Field(min_length=1, max_length=120)
+    build_id: str | None = Field(default=None, max_length=120)
+
+
+class DeletedBuild(StrictModel):
+    deleted_build_id: str = Field(min_length=1, max_length=120)
+    active_build_id: str | None = Field(default=None, max_length=120)

@@ -17,6 +17,7 @@ from app.evaluation.openai_provider import OpenAIEvaluationProvider
 from app.evaluation.provider import EvaluationProviderError
 from app.evaluation.schemas import EvaluationInput, EvaluationResult
 from app.main import app
+from tests.build_seed import seed_builtin_builds
 
 ROOT = Path(__file__).parents[1]
 
@@ -180,6 +181,8 @@ def isolated_db(tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     event.listen(engine, "connect", enable_sqlite_foreign_keys)
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
+    with factory() as db:
+        seed_builtin_builds(db)
 
     async def override() -> AsyncIterator[Session]:
         with factory() as session:

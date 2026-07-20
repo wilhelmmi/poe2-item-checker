@@ -87,12 +87,13 @@ class Modifier(Base):
 class EquipmentSlot(Base):
     __tablename__ = "equipment_slots"
     character_id: Mapped[int] = mapped_column(ForeignKey("character_profiles.id"), primary_key=True)
+    build_id: Mapped[str] = mapped_column(ForeignKey("builds.build_id", ondelete="CASCADE"), primary_key=True)
     slot: Mapped[str] = mapped_column(String(30), primary_key=True)
-    item_id: Mapped[str | None] = mapped_column(ForeignKey("items.id"), unique=True)
+    item_id: Mapped[str | None] = mapped_column(ForeignKey("items.id"))
 
 
-class CustomBuild(Base):
-    __tablename__ = "custom_builds"
+class Build(Base):
+    __tablename__ = "builds"
     __table_args__ = (
         UniqueConstraint("source_url", "fingerprint", name="uq_custom_build_source_fingerprint"),
         UniqueConstraint("source_url", "version", name="uq_custom_build_source_version"),
@@ -114,6 +115,10 @@ class CustomBuild(Base):
     constraints: Mapped[list[str]] = mapped_column(JSON, default=list)
     citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+# Compatibility name for callers that used the pre-0006 model.
+CustomBuild = Build
 
 
 class BuildPreview(Base):

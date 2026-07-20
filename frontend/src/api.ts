@@ -92,19 +92,22 @@ export async function evaluateItem(rawText: string, signal: AbortSignal, targetS
 }
 
 export async function loadBuilds(): Promise<BuildContext[]> { const response = await fetch('/api/builds'); if (!response.ok) throw new Error('Builds konnten nicht geladen werden.'); return response.json() as Promise<BuildContext[]> }
-export async function loadActiveBuild(signal?:AbortSignal): Promise<string> { const response=await fetch('/api/builds/active',{signal}); if(!response.ok)throw new Error('Aktiver Build konnte nicht geladen werden.'); return (await response.json() as {build_id:string}).build_id }
+export async function loadActiveBuild(signal?:AbortSignal): Promise<string|null> { const response=await fetch('/api/builds/active',{signal}); if(!response.ok)throw new Error('Aktiver Build konnte nicht geladen werden.'); return (await response.json() as {build_id:string|null}).build_id }
 export async function saveActiveBuild(buildId:string,signal?:AbortSignal): Promise<string> { const response=await fetch('/api/builds/active',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({build_id:buildId}),signal}); if(!response.ok)throw new Error('Aktiver Build konnte nicht gespeichert werden.'); return (await response.json() as {build_id:string}).build_id }
 async function buildError(response:Response):Promise<Error>{const body=await response.json().catch(()=>null) as {detail?:{message?:string}}|null;return new Error(body?.detail?.message??`Build-Aktion fehlgeschlagen (${response.status}).`)}
+export async function deleteBuild(buildId:string,signal?:AbortSignal):Promise<{deleted_build_id:string;active_build_id:string|null}>{const response=await fetch(`/api/builds/${encodeURIComponent(buildId)}`,{method:'DELETE',signal});if(!response.ok)throw await buildError(response);const data:unknown=await response.json().catch(()=>null);if(typeof data!=='object'||data===null||Array.isArray(data)){throw new Error('Der Server hat nach dem Löschen keinen gültigen Build-Status geliefert.')}const deleted=(data as {deleted_build_id?:unknown}).deleted_build_id;const active=(data as {active_build_id?:unknown}).active_build_id;if(typeof deleted!=='string'||!deleted.trim()||deleted!==buildId||!(active===null||typeof active==='string'&&!!active.trim())){throw new Error('Der Server hat nach dem Löschen keinen gültigen Build-Status geliefert.')}return {deleted_build_id:deleted,active_build_id:active as string|null}}
 export async function analyzeBuild(sourceUrl:string,signal?:AbortSignal):Promise<BuildPreview>{const response=await fetch('/api/builds/previews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_url:sourceUrl}),signal});if(!response.ok)throw await buildError(response);return response.json() as Promise<BuildPreview>}
 export async function confirmBuild(previewId:string):Promise<BuildContext>{const response=await fetch(`/api/builds/previews/${encodeURIComponent(previewId)}/confirm`,{method:'POST'});if(!response.ok)throw await buildError(response);return response.json() as Promise<BuildContext>}
 
-export async function loadEquipment(signal?: AbortSignal): Promise<Equipment> { const response = await fetch('/api/equipment',{signal}); if (!response.ok) throw new Error('Equipment konnte nicht geladen werden.'); return response.json() as Promise<Equipment> }
-export async function saveEquipment(slot: string, raw_text: string, signal?: AbortSignal): Promise<{ id: string; item: ParsedItem }> { const response = await fetch(`/api/equipment/${slot}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text }), signal }); if (!response.ok) { const body = await response.json().catch(() => null) as { detail?: { code?: string } } | null; throw new Error(body?.detail?.code === 'ambiguous_item_format' ? 'Der Itemtext ist mehrdeutig und muss manuell formatiert werden.' : 'Equipment konnte nicht gespeichert werden.') } return response.json() as Promise<{ id: string; item: ParsedItem }> }
+export async function loadEquipment(buildId:string, signal?: AbortSignal): Promise<Equipment> { const response = await fetch(`/api/builds/${encodeURIComponent(buildId)}/equipment`,{signal}); if (!response.ok) throw new Error('Equipment konnte nicht geladen werden.'); const data:unknown=await response.json().catch(()=>null); if(!isEquipment(data))throw new Error('Equipment konnte nicht geladen werden: Der Server hat keinen gültigen Equipment-Zustand geliefert.'); return data }
+export async function saveEquipment(buildId:string, slot: string, raw_text: string, signal?: AbortSignal): Promise<{ id: string; item: ParsedItem }> { const response = await fetch(`/api/builds/${encodeURIComponent(buildId)}/equipment/${slot}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text }), signal }); if (!response.ok) { const body = await response.json().catch(() => null) as { detail?: { code?: string } } | null; throw new Error(body?.detail?.code === 'ambiguous_item_format' ? 'Der Itemtext ist mehrdeutig und muss manuell formatiert werden.' : 'Equipment konnte nicht gespeichert werden.') } return response.json() as Promise<{ id: string; item: ParsedItem }> }
 
-export async function equipEquipment(raw_text: string, ringSlot: string, signal?: AbortSignal): Promise<Equipment> {
-  const response = await fetch('/api/equipment/equip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text, ring_slot: ringSlot === 'ring_2' ? 'ring_2' : 'ring_1' }), signal })
+export async function equipEquipment(buildId:string, raw_text: string, ringSlot: string, signal?: AbortSignal): Promise<Equipment> {
+  const response = await fetch(`/api/builds/${encodeURIComponent(buildId)}/equipment/equip`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw_text, ring_slot: ringSlot === 'ring_2' ? 'ring_2' : 'ring_1' }), signal })
   if (!response.ok) throw await managementError(response, 'Equipment konnte nicht ausgerüstet werden')
-  return response.json() as Promise<Equipment>
+  const data:unknown=await response.json().catch(()=>null)
+  if(!isEquipment(data))throw new Error('Equipment konnte nicht ausgerüstet werden: Der Server hat keinen gültigen Equipment-Zustand geliefert.')
+  return data
 }
 
 async function managementError(response: Response, fallback: string): Promise<Error> {
@@ -127,7 +130,7 @@ async function managementError(response: Response, fallback: string): Promise<Er
   return new Error(code ? `${fallback} (${code}).` : `${fallback} (${response.status}).`)
 }
 
-function isEquipment(value: unknown): value is Equipment {
+export function isEquipment(value: unknown): value is Equipment {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const slots = (value as { slots?: unknown }).slots
   if (typeof slots !== 'object' || slots === null || Array.isArray(slots)) return false
@@ -156,7 +159,7 @@ function sameEquipment(left: Equipment, right: Equipment): boolean {
   })
 }
 
-export async function importEquipmentFile(file: File, signal?: AbortSignal): Promise<EquipmentImportResult> {
+export async function importEquipmentFile(buildId:string, file: File, signal?: AbortSignal): Promise<EquipmentImportResult> {
   if (file.size > 2_000_000) throw new Error('Die Importdatei ist größer als 2 MB.')
   let data: unknown
   try { data = JSON.parse(await file.text()) } catch { throw new Error('Die Importdatei enthält kein gültiges JSON.') }
@@ -169,7 +172,7 @@ export async function importEquipmentFile(file: File, signal?: AbortSignal): Pro
   if (!isObject || (![1, 2].includes(typeof schemaVersion === 'number' ? schemaVersion : 0) && !isStructuredEquipment)) {
     throw new Error('Unterstützt werden Equipment-Dateien mit schema_version 1 oder 2 sowie strukturierte PoE2-Equipment-Dateien.')
   }
-  const response = await fetch('/api/equipment/import', {
+  const response = await fetch(`/api/builds/${encodeURIComponent(buildId)}/equipment/import`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal,
   })
   if (!response.ok) throw await managementError(response, 'Import fehlgeschlagen')
@@ -177,7 +180,7 @@ export async function importEquipmentFile(file: File, signal?: AbortSignal): Pro
   if (!isEquipment(imported)) {
     throw new Error('Import fehlgeschlagen: Der Server hat keine gültige Equipment-Antwort geliefert.')
   }
-  const verified: unknown = await loadEquipment(signal)
+  const verified: unknown = await loadEquipment(buildId, signal)
   if (!isEquipment(verified)) {
     throw new Error('Import konnte nicht verifiziert werden: Der Server hat keinen gültigen Equipment-Zustand geliefert.')
   }
@@ -190,8 +193,8 @@ export async function importEquipmentFile(file: File, signal?: AbortSignal): Pro
     : verified
 }
 
-export async function exportEquipmentFile(): Promise<EquipmentExport> {
-  const response = await fetch('/api/equipment/export')
+export async function exportEquipmentFile(buildId:string): Promise<EquipmentExport> {
+  const response = await fetch(`/api/builds/${encodeURIComponent(buildId)}/equipment/export`)
   if (!response.ok) throw await managementError(response, 'Export fehlgeschlagen')
   const isPlainObject = (value: unknown): value is Record<string, unknown> => (
     typeof value === 'object' && value !== null && !Array.isArray(value)

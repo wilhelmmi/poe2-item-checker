@@ -36,7 +36,7 @@ Stand: 2026-07-20 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt u
   Wand und Fokus gemeinsam verglichen und ersetzt beim Ausrüsten beide Slots atomar.
 - Öffentliche Build-Links werden über die OpenAI-Websuche analysiert. Nur Analysen mit
   überprüfbaren URL-Zitationen werden als Vorschau angeboten; erst die Bestätigung speichert
-  einen versionierten Custom Build. Custom Builds und die aktive Auswahl bleiben persistent.
+  einen versionierten Build. Alle Builds sind DB-basiert und löschbar; null Builds sind zulässig.
 - Ein leerer Zielslot wird vor dem Provideraufruf mit `equipped_item_required` abgewiesen.
 - Item-Rohtext, unbekannte Rohzeilen, Modifier-Rohtext sowie Profilname und -notizen werden
   nicht an den Provider übertragen. Beobachtete Prozent-Modifier, sachliche Trade-offs und
@@ -47,10 +47,13 @@ Stand: 2026-07-20 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt u
 
 ## Build-Registry
 
-Eingebaut sind `deadrabb1t-chaos-dot-lich-starter-v1` für Kompatibilität und
-`deadrabb1t-chaos-dot-lich-starter-v2` als Standard, jeweils `default-variant`,
+Bei Migration 0006 werden `deadrabb1t-chaos-dot-lich-starter-v1` für Kompatibilität und
+`deadrabb1t-chaos-dot-lich-starter-v2` als Standard in der Datenbank angelegt, jeweils `default-variant`,
 ED/Contagion Chaos DoT Lich Starter von DEADRABB1T. Bestätigte Link-Analysen werden als
-weitere versionierte Custom Builds gespeichert; Request und UI führen `build_id`.
+weitere versionierte Builds gespeichert; Request und UI führen `build_id`. Equipment ist
+über diese ID vollständig getrennt. Profilwerte und gespeicherte Evaluationen bleiben global;
+die nicht mehr im UI angebotene Legacy-Backup-/Local-History-Logik liest nur Equipment des
+aktiven Builds und verweigert einen mehrdeutigen Multi-Build-Restore sicher.
 
 ## Kompatibilität
 

@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.buildfit.engine import compare_slots
+from app.builds.service import get_active
 from app.db.models import CharacterProfile, EquipmentSlot, Evaluation, Item, Modifier, SaleRecord
 from app.equipment.service import SLOT_CLASSES, get_or_create_profile, item_schema, profile_schema, store_item
 from app.facts.engine import check_item_facts
@@ -19,7 +20,12 @@ BLOCKING = {"input_missing_line_breaks", "missing_item_identity", "no_modifiers_
 
 
 def _equipment(db: Session) -> tuple[dict, set[str]]:
-    rows = db.scalars(select(EquipmentSlot).where(EquipmentSlot.character_id == 1)).all()
+    build_id = get_active(db)
+    if build_id is None:
+        return {}, set()
+    rows = db.scalars(select(EquipmentSlot).where(
+        EquipmentSlot.character_id == 1, EquipmentSlot.build_id == build_id,
+    )).all()
     known = {row.slot for row in rows}
     equipment = {}
     for row in rows:
@@ -163,7 +169,10 @@ def create_backup(db: Session) -> FullBackup:
     items = db.scalars(select(Item).order_by(Item.created_at, Item.id)).all()
     evaluations = db.scalars(select(Evaluation).order_by(Evaluation.created_at, Evaluation.id)).all()
     sales = db.scalars(select(SaleRecord).order_by(SaleRecord.id)).all()
-    slots = {row.slot: row.item_id for row in db.scalars(select(EquipmentSlot).where(EquipmentSlot.character_id == 1))}
+    build_id = get_active(db)
+    slots = {} if build_id is None else {row.slot: row.item_id for row in db.scalars(select(EquipmentSlot).where(
+        EquipmentSlot.character_id == 1, EquipmentSlot.build_id == build_id,
+    ))}
     return FullBackup(
         profile=profile_schema(profile), equipment={slot: slots.get(slot) for slot in SLOTS},
         items=[BackupItem(id=item.id, created_at=item.created_at, item=item_schema(item)) for item in items],
@@ -178,11 +187,26 @@ def create_backup(db: Session) -> FullBackup:
 def restore_backup(db: Session, backup: FullBackup) -> None:
     # Pydantic has fully validated structure and references before this transaction starts.
     try:
+        build_id = get_active(db)
+        if build_id is None:
+            raise ValueError("active_build_required")
+        other_equipment = db.scalar(select(func.count()).select_from(EquipmentSlot).where(
+            EquipmentSlot.build_id != build_id,
+        ))
+        if other_equipment:
+            raise ValueError("multi_build_restore_unsupported")
         db.query(SaleRecord).delete()
         db.query(Evaluation).delete()
-        db.query(EquipmentSlot).delete()
-        db.query(Modifier).delete()
-        db.query(Item).delete()
+        db.query(EquipmentSlot).filter(
+            EquipmentSlot.character_id == 1, EquipmentSlot.build_id == build_id,
+        ).delete()
+        protected_items = select(EquipmentSlot.item_id).where(
+            EquipmentSlot.item_id.is_not(None), EquipmentSlot.build_id != build_id,
+        )
+        db.query(Modifier).filter(Modifier.item_id.not_in(protected_items)).delete(
+            synchronize_session=False
+        )
+        db.query(Item).filter(Item.id.not_in(protected_items)).delete(synchronize_session=False)
         db.query(CharacterProfile).delete()
         profile = CharacterProfile(id=1, **backup.profile.model_dump())
         db.add(profile)
@@ -193,7 +217,7 @@ def restore_backup(db: Session, backup: FullBackup) -> None:
             db.add(item)
         db.flush()
         for slot, item_id in backup.equipment.items():
-            db.add(EquipmentSlot(character_id=1, slot=slot, item_id=item_id))
+            db.add(EquipmentSlot(character_id=1, build_id=build_id, slot=slot, item_id=item_id))
         db.flush()
         pending = list(backup.evaluations)
         inserted: set[str] = set()
