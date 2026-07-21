@@ -322,6 +322,7 @@ describe('API-only comparison', () => {
     const staleSlots:Record<string,{id:string;item:typeof parsedItem}|null>=emptySlots();staleSlots.wand={id:'stale',item:staleItem}
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?(++equipmentGets===1?initial:response({slots:importedSlots})):String(input).endsWith('/equipment/import')?response({slots:importedSlots}):response({build_id:build.build_id}))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
+    await waitFor(()=>expect(equipmentGets).toBe(1))
     const file={size:100,text:async()=>JSON.stringify({schema_version:2})} as File;fireEvent.change(screen.getByLabelText('Equipment-Datei importieren'),{target:{files:[file]}})
     expect(await screen.findByText('Imported Wand')).toBeTruthy();resolveInitial(new Response(JSON.stringify({slots:staleSlots}),{status:200,headers:{'Content-Type':'application/json'}}))
     await waitFor(()=>expect(screen.queryByText('Stale Wand')).toBeNull())
