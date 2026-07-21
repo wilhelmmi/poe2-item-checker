@@ -36,6 +36,7 @@ class EvaluationResult(StrictModel):
     losses: list[BoundedExplanation] = Field(default_factory=list, max_length=8)
     impacts: BuildImpacts
     clear_recommendation: str = Field(min_length=1, max_length=500)
+    recommended_target_slot: Slot | None = None
 
     @model_validator(mode="after")
     def reject_out_of_scope_claims(self) -> "EvaluationResult":
@@ -103,10 +104,12 @@ class EvaluationResult(StrictModel):
 
 class EvaluationInput(StrictModel):
     candidate: ParsedItem
-    equipped: ParsedItem
+    equipped: ParsedItem | None
     equipped_slots: dict[Slot, ParsedItem | None] = Field(default_factory=dict)
     target_slot: Slot
     target_slots: list[Slot] = Field(default_factory=list)
+    comparison_slots: list[Slot] = Field(default_factory=list)
+    available_target_slots: list[Slot] = Field(default_factory=list)
     observed_profile: ProfileData | None
     build: BuildContext
 
@@ -116,12 +119,20 @@ class EvaluationInput(StrictModel):
             self.target_slots = [self.target_slot]
         if not self.equipped_slots:
             self.equipped_slots = {self.target_slot: self.equipped}
+        if not self.comparison_slots:
+            self.comparison_slots = list(self.target_slots)
+        if not self.available_target_slots:
+            self.available_target_slots = list(self.comparison_slots)
         if self.target_slot not in self.target_slots or len(set(self.target_slots)) != len(self.target_slots):
             raise ValueError("target_slots must uniquely contain target_slot")
-        if set(self.equipped_slots) != set(self.target_slots):
-            raise ValueError("equipped_slots must exactly match target_slots")
+        if len(set(self.comparison_slots)) != len(self.comparison_slots):
+            raise ValueError("comparison_slots must be unique")
+        if set(self.equipped_slots) != set(self.comparison_slots):
+            raise ValueError("equipped_slots must exactly match target_slots/comparison_slots")
+        if not set(self.available_target_slots) <= set(self.comparison_slots):
+            raise ValueError("available_target_slots must be contained in comparison_slots")
         alias = self.equipped_slots[self.target_slot]
-        if alias is None:
+        if alias is None and len(self.target_slots) > 1:
             alias = next((item for item in self.equipped_slots.values() if item is not None), None)
         if alias != self.equipped:
             raise ValueError("equipped must match the canonical equipped_slots item")
@@ -143,9 +154,11 @@ class EvaluateItemResponse(StrictModel):
     parse: ParseItemResponse
     build: BuildContext
     target_slot: Slot
-    equipped: ParsedItem
+    equipped: ParsedItem | None
     equipped_slots: dict[Slot, ParsedItem | None]
     target_slots: list[Slot]
+    comparison_slots: list[Slot] = Field(default_factory=list)
+    available_target_slots: list[Slot] = Field(default_factory=list)
     evaluation: EvaluationResult | None
     provider: str | None
     model: str | None

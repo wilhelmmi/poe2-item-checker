@@ -1,12 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App, candidateTargetSlot } from './App'
+import { ParsedItem } from './api'
 
 const build = { build_id:'deadrabb1t-chaos-dot-lich-starter-v2',version:2,name:'ED Contagion Chaos DoT Lich Starter',author:'DEADRABB1T',source_url:'https://example.test',source_variant:'default-variant',archetype:'chaos dot',core_skills:[],offensive_priorities:[],defensive_priorities:[],item_priorities:[],low_value_stats:[],constraints:[] }
 const parsedItem = { raw_text:'item',unknown_lines:[],item_class:'Wands',rarity:'Rare',name:'Doom',base_type:'Wand',required_level:null,required_strength:null,required_dexterity:null,required_intelligence:null,item_level:null,quality:null,granted_skill:null,sockets:[],armour:null,armour_augmented:false,evasion:null,evasion_augmented:false,energy_shield:null,energy_shield_augmented:false,spirit:null,identified:true,corrupted:false,modifiers:[] }
 const parsedResponse = { item:parsedItem,warnings:[],line_break_suggestion:null,auto_format_status:'unchanged' }
-const evaluation = { parse:{item:parsedItem,warnings:[],line_break_suggestion:null},build,target_slot:'wand',target_slots:['wand'],equipped:parsedItem,equipped_slots:{wand:parsedItem},evaluation:{recommendation:'better',confidence:'high',reasons:['Mehr relevante Werte.'],warnings:[],verdict:'upgrade',current_item_name:'Doom',new_item_name:'Hope',gains:['Mehr Chaos-Schaden.'],losses:['Weniger Mana.'],impacts:{damage:'better',defensive:'similar',resistances:'similar',utility:'worse'},clear_recommendation:'Neues Item ausrüsten.'},provider:'fake',model:'mock',provider_status:'success',provider_error:null,disclaimer:'Keine Markt- oder Craftingbewertung.' }
-const emptySlots=()=>Object.fromEntries(['wand','focus','helmet','body_armour','gloves','boots','belt','ring_1','ring_2','amulet'].map(slot=>[slot,null]))
+const evaluation = { parse:{item:parsedItem,warnings:[],line_break_suggestion:null},build,target_slot:'wand',target_slots:['wand'],comparison_slots:['wand'],equipped:parsedItem,equipped_slots:{wand:parsedItem},evaluation:{recommendation:'better',confidence:'high',reasons:['Mehr relevante Werte.'],warnings:[],verdict:'upgrade',current_item_name:'Doom',new_item_name:'Hope',gains:['Mehr Chaos-Schaden.'],losses:['Weniger Mana.'],impacts:{damage:'better',defensive:'similar',resistances:'similar',utility:'worse'},clear_recommendation:'Neues Item ausrüsten.',recommended_target_slot:'wand'},provider:'fake',model:'mock',provider_status:'success',provider_error:null,disclaimer:'Keine Markt- oder Craftingbewertung.' }
+const emptySlots=()=>Object.fromEntries(['wand','focus','helmet','body_armour','gloves','boots','belt','ring_1','ring_2','amulet','charm_1','charm_2','charm_3'].map(slot=>[slot,null]))
 const emptyEquipment=()=>({slots:emptySlots()})
 
 function response(data: unknown, ok=true) { return Promise.resolve(new Response(JSON.stringify(data),{status:ok?200:500,headers:{'Content-Type':'application/json'}})) }
@@ -25,10 +26,11 @@ describe('API-only comparison', () => {
     expect(screen.getByRole('heading',{name:'Candidate vergleichen'})).toBeTruthy()
     expect(screen.getByRole('complementary',{name:'Build und Equipment'})).toBeTruthy()
     expect(await screen.findByRole('heading',{name:'Aktuelles Equipment'})).toBeTruthy()
-    expect(screen.getByText('Zauberstab')).toBeTruthy();expect(screen.getByText('Körperrüstung')).toBeTruthy()
-    expect(screen.getAllByText('Nicht ausgerüstet')).toHaveLength(10)
+    expect(await screen.findByText('Zauberstab')).toBeTruthy();expect(screen.getByText('Körperrüstung')).toBeTruthy()
+    expect(screen.getAllByText('Nicht ausgerüstet')).toHaveLength(11)
+    expect(screen.getAllByText('Durch aktuellen Gürtel gesperrt')).toHaveLength(2)
     expect(screen.getByRole('list',{name:'Aktuell ausgerüstete Items'})).toBeTruthy();expect(screen.getAllByRole('listitem')).toHaveLength(8)
-    expect(screen.getByRole('group',{name:'Ring-Zielslot'})).toBeTruthy()
+    expect(screen.getByRole('group',{name:'Ringe'})).toBeTruthy();expect(screen.getByRole('group',{name:'Charms'})).toBeTruthy()
     expect(screen.queryByLabelText('Equipment-Slot')).toBeNull();expect(screen.queryByText('Slot speichern')).toBeNull()
   })
   it('reviews a linked build with citations before confirming and activating it', async () => {
@@ -116,12 +118,9 @@ describe('API-only comparison', () => {
   it.each([
     ['Wands','wand'],['Foci','focus'],['Helmets','helmet'],['Body Armours','body_armour'],
     ['Gloves','gloves'],['Boots','boots'],['Belts','belt'],['Amulets','amulet'],['Staves','wand'],
+    ['Rings','ring_1'],['Charms','charm_1'],
   ])('maps candidate class %s to %s', (itemClass,targetSlot) => {
     expect(candidateTargetSlot(itemClass,'wand')).toBe(targetSlot)
-  })
-  it('uses the selected ring position and otherwise defaults to ring_1', () => {
-    expect(candidateTargetSlot('Rings','ring_2')).toBe('ring_2')
-    expect(candidateTargetSlot('Rings','wand')).toBe('ring_1')
   })
   it('shows the versioned build and sends build and target slot', async () => {
     const fetchMock=vi.fn((input:RequestInfo|URL, _init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(parsedResponse):response(evaluation))
@@ -153,7 +152,7 @@ describe('API-only comparison', () => {
     expect(await screen.findByText(/Zielslot: boots/)).toBeTruthy()
     const body=JSON.parse(fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')![1]!.body as string)
     expect(body.target_slot).toBe('boots')
-    expect((screen.getByLabelText('Ring 1 als Zielslot wählen') as HTMLInputElement).checked).toBe(true)
+    expect(screen.queryByLabelText(/als Zielslot wählen/)).toBeNull()
   })
   it('does not evaluate unsupported candidate classes', async () => {
     const parse={item:{...parsedItem,item_class:'Quivers'},warnings:[],line_break_suggestion:null,auto_format_status:'unchanged'}
@@ -164,10 +163,10 @@ describe('API-only comparison', () => {
     expect(await screen.findByText(/Quivers wird nicht als Equipment-Slot unterstützt/)).toBeTruthy()
     expect(fetchMock.mock.calls.some(call=>call[0]==='/api/items/evaluate')).toBe(false)
   })
-  it('invalidates a recommendation when comparison context changes', async () => {
+  it('does not expose a manual ring comparison context', async () => {
     const ring={...parsedItem,item_class:'Rings'};const ringParse={...parsedResponse,item:ring};const ringEvaluation={...evaluation,parse:{...evaluation.parse,item:ring},target_slot:'ring_1',target_slots:['ring_1']}
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(ringParse):response(ringEvaluation)))
-    render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'})); await screen.findByText(/Candidate ist besser/); fireEvent.click(screen.getByLabelText('Ring 2 als Zielslot wählen')); await waitFor(()=>expect(screen.queryByText(/Candidate ist besser/)).toBeNull())
+    render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'})); await screen.findByText(/Candidate ist besser/); expect(screen.queryByLabelText(/als Zielslot wählen/)).toBeNull()
   })
   it('autoformats safe input without offering an undo action', async () => {
     const original='Item Class: Wands Rarity: Magic Apt Wand'
@@ -208,7 +207,32 @@ describe('API-only comparison', () => {
     const slots:Record<string,{id:string;item:typeof parsedItem}|null>=emptySlots();slots.wand={id:'wand',item:parsedItem}
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response({slots}):response({build_id:build.build_id})))
     render(<App/>)
-    expect(await screen.findByText('Doom')).toBeTruthy();expect(screen.getByText('Wand')).toBeTruthy();expect(screen.getByText('Rare')).toBeTruthy();expect(screen.getByText('1/10')).toBeTruthy()
+    expect(await screen.findByText('Doom')).toBeTruthy();expect(screen.getByText('Wand')).toBeTruthy();expect(screen.getByText('Rare')).toBeTruthy();expect(screen.getByText('1/13')).toBeTruthy()
+  })
+  it('shows game-like item details on hover and keyboard focus without raw JSON', async () => {
+    const detailed:ParsedItem={...parsedItem,rarity:'Rare',name:'Doom Weaver',base_type:'Attuned Wand',quality:20,energy_shield:41,energy_shield_augmented:true,spirit:30,required_level:44,required_intelligence:72,item_level:66,sockets:['S','S'],granted_skill:'Level 14 Firebolt',corrupted:true,modifiers:[
+      {source:'implicit',affix_type:null,name:null,tier:null,tags:[],raw_text:'18% increased Spell Damage',normalized_key:'spell_damage',values:[18],roll_ranges:[],crafted:false,desecrated:false,rune:false,implicit:true,unique:false},
+      {source:'explicit',affix_type:'prefix',name:'Flaming',tier:3,tags:['fire'],raw_text:'Level 14 Firebolt',normalized_key:'granted_skill',values:[14],roll_ranges:[],crafted:false,desecrated:false,rune:false,implicit:false,unique:false},
+      {source:'explicit',affix_type:'suffix',name:'of Siphoning',tier:3,tags:['mana'],raw_text:'Gain 23 Mana per enemy killed',normalized_key:'mana_kill',values:[23],roll_ranges:[],crafted:false,desecrated:false,rune:false,implicit:false,unique:false},
+    ]}
+    const itemSlots:Record<string,{id:string;item:ParsedItem}|null>=emptySlots();itemSlots.wand={id:'wand',item:detailed}
+    vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response({slots:itemSlots}):response({build_id:build.build_id})))
+    render(<App/>);const card=(await screen.findByText('Doom Weaver')).closest('article')!
+    fireEvent.mouseEnter(card);expect(screen.getByRole('tooltip')).toBeTruthy();expect(screen.getByText('Qualität: +20%')).toBeTruthy();expect(screen.getByText('Energieschild: 41').classList.contains('item-value-augmented')).toBe(true);expect(screen.getByText('Level 44')).toBeTruthy();expect(screen.getByText('Gegenstandsstufe')).toBeTruthy();expect(screen.getByText('Gain 23 Mana per enemy killed')).toBeTruthy();expect(screen.getByText('Korrumpiert')).toBeTruthy()
+    expect(screen.getAllByText('Level 14 Firebolt')).toHaveLength(1);expect(screen.queryByText(/"raw_text"/)).toBeNull();expect(screen.getByRole('tooltip').querySelector('.rarity-rare')).toBeTruthy()
+    fireEvent.mouseLeave(card);expect(screen.queryByRole('tooltip')).toBeNull();fireEvent.focus(card);expect(screen.getByRole('tooltip')).toBeTruthy()
+  })
+  it('opens pinned ring details and closes them with Escape', async () => {
+    const itemSlots:Record<string,{id:string;item:ParsedItem}|null>=emptySlots();itemSlots.ring_1={id:'ring-1',item:{...parsedItem,item_class:'Rings',name:'Skull Knot',base_type:'Amethyst Ring'}};itemSlots.ring_2={id:'ring-2',item:{...parsedItem,item_class:'Rings',name:'Pandemonium Nail',base_type:'Topaz Ring'}}
+    vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response({slots:itemSlots}):response({build_id:build.build_id})))
+    render(<App/>);await screen.findByText('Skull Knot');expect(screen.queryByLabelText(/als Zielslot wählen/)).toBeNull()
+    const details=screen.getAllByRole('button',{name:'Details anzeigen'});fireEvent.click(details[0]);expect(screen.getByRole('dialog',{name:'Details zu Skull Knot'})).toBeTruthy();expect(document.activeElement).toBe(screen.getByRole('button',{name:'Itemdetails schließen'}))
+    fireEvent.keyDown(document,{key:'Tab'});expect(document.activeElement).toBe(screen.getByRole('button',{name:'Itemdetails schließen'}));fireEvent.keyDown(document,{key:'Escape'});expect(screen.queryByRole('dialog')).toBeNull();expect(document.activeElement).toBe(details[0]);expect(screen.getByText('Pandemonium Nail')).toBeTruthy()
+  })
+  it('does not offer item details for empty or blocked equipment slots', async () => {
+    const itemSlots:Record<string,{id:string;item:ParsedItem}|null>=emptySlots();itemSlots.wand={id:'staff',item:{...parsedItem,item_class:'Staves',name:'Ashen Staff',base_type:'Ashen Staff'}}
+    vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response({slots:itemSlots}):response({build_id:build.build_id})))
+    render(<App/>);await screen.findByText('Durch Stab blockiert');expect(screen.getAllByRole('button',{name:'Details anzeigen'})).toHaveLength(1)
   })
   it('equips the compared candidate into the exact target slot', async () => {
     const parse={item:parsedItem,warnings:[],line_break_suggestion:null,auto_format_status:'unchanged'}
@@ -220,7 +244,7 @@ describe('API-only comparison', () => {
     fireEvent.click(screen.getByRole('button',{name:'Candidate ausrüsten'}))
     expect(await screen.findByText(/Candidate wurde in wand ausgerüstet/)).toBeTruthy()
     const saveCall=fetchMock.mock.calls.find(call=>String(call[0]).endsWith('/equipment/equip'))
-    expect(JSON.parse(saveCall![1]!.body as string)).toEqual({raw_text:'item',ring_slot:'ring_1'})
+    expect(JSON.parse(saveCall![1]!.body as string)).toEqual({raw_text:'item',target_slot:'wand'})
     expect(screen.queryByText(/Candidate ist besser/)).toBeNull()
   })
   it('does not send a second equipment mutation on a rapid equip double click', async () => {
@@ -251,13 +275,13 @@ describe('API-only comparison', () => {
     await screen.findByText(/Komplettes Equipment importiert/)
   })
   it('updates the selected slot after a complete equipment import', async () => {
-    const importedSlots:Record<string,{id:string;item:typeof parsedItem}|null>=Object.fromEntries(['wand','focus','helmet','body_armour','gloves','boots','belt','ring_1','ring_2','amulet'].map(slot=>[slot,null]))
+    const importedSlots:Record<string,{id:string;item:typeof parsedItem}|null>=Object.fromEntries(['wand','focus','helmet','body_armour','gloves','boots','belt','ring_1','ring_2','amulet','charm_1','charm_2','charm_3'].map(slot=>[slot,null]))
     importedSlots.wand={id:'wand-item',item:{...parsedItem,raw_text:'formatted wand'}}
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response({slots:importedSlots}))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
     const file={size:100,text:async()=>JSON.stringify({schema_version:2})} as File
     fireEvent.change(screen.getByLabelText('Equipment-Datei importieren'),{target:{files:[file]}})
-    expect(await screen.findByText(/Komplettes Equipment importiert: 1 von 10 Slots belegt/)).toBeTruthy()
+    expect(await screen.findByText(/Komplettes Equipment importiert: 1 von 13 Slots belegt/)).toBeTruthy()
     expect(screen.getByText('Doom')).toBeTruthy();expect(screen.getByText('Wand')).toBeTruthy()
     expect(fetchMock.mock.calls.filter(call=>String(call[0]).endsWith('/equipment'))).toHaveLength(2)
   })
@@ -303,15 +327,12 @@ describe('API-only comparison', () => {
     await waitFor(()=>expect(screen.queryByText('Stale Wand')).toBeNull())
   })
 
-  it('uses the selected second ring while leaving non-ring results intact', async () => {
-    const ring={...parsedItem,item_class:'Rings'};const ringParse={...parsedResponse,item:ring};const ringEvaluation={...evaluation,parse:{...evaluation.parse,item:ring},target_slot:'ring_2',target_slots:['ring_2']}
-    let compareAsRing=false
-    const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(compareAsRing?ringParse:parsedResponse):input==='/api/items/evaluate'?response(compareAsRing?ringEvaluation:evaluation):response({build_id:build.build_id}))
+  it('lets the backend choose the second ring without a manual selector', async () => {
+    const ring={...parsedItem,item_class:'Rings'};const ringParse={...parsedResponse,item:ring};const ringEvaluation={...evaluation,parse:{...evaluation.parse,item:ring},target_slot:'ring_2',target_slots:['ring_2'],comparison_slots:['ring_1','ring_2'],equipped_slots:{ring_1:ring,ring_2:ring},evaluation:{...evaluation.evaluation,recommended_target_slot:'ring_2'}}
+    const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(ringParse):input==='/api/items/evaluate'?response(ringEvaluation):response({build_id:build.build_id}))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByLabelText('Aktuell ausgerüstete Items')
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
-    fireEvent.click(screen.getByLabelText('Ring 2 als Zielslot wählen'));expect(screen.getByText(/Candidate ist besser/)).toBeTruthy()
-    compareAsRing=true;fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await waitFor(()=>expect(fetchMock.mock.calls.filter(call=>call[0]==='/api/items/evaluate')).toHaveLength(2))
-    const body=JSON.parse(fetchMock.mock.calls.filter(call=>call[0]==='/api/items/evaluate')[1]![1]!.body as string);expect(body.target_slot).toBe('ring_2')
+    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));expect(await screen.findByText(/Zielslot: ring_2/)).toBeTruthy()
+    const body=JSON.parse(fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')![1]!.body as string);expect(body.target_slot).toBe('ring_1')
   })
 
   it('refetches committed server state after an import reports failure', async () => {

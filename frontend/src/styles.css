@@ -104,13 +104,15 @@ li { margin: .3rem 0; line-height: 1.45; }
 .ring-target-group { min-width: 0; margin: .75rem 0 0; padding: .65rem; border: 1px solid var(--border); border-radius: 6px; }
 .ring-target-group legend { padding: 0 .35rem; color: var(--muted); font-size: .63rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .ring-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
-.equipment-card { position: relative; min-height: 6.4rem; padding: .65rem; align-content: start; gap: .2rem; border: 1px solid #39353c; border-radius: 6px; background: #101013; cursor: default; overflow: hidden; }
+.equipment-card { position: relative; min-height: 6.4rem; padding: .65rem; display: grid; align-content: start; gap: .2rem; border: 1px solid #39353c; border-radius: 6px; background: #101013; cursor: default; }
 .equipment-card:has(input) { cursor: pointer; }
 .equipment-card:has(input):hover { border-color: #66563e; background: #141318; }
 .equipment-card.is-selected { border-color: var(--gold-dark); box-shadow: inset 0 0 0 1px rgba(210,168,95,.12); }
 .equipment-card.is-blocked { border-style: dashed; opacity: .7; }
 .equipment-card input { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip-path: inset(50%); }
 .equipment-card:has(input:focus-visible) { outline: 2px solid var(--gold-bright); outline-offset: 2px; }
+.equipment-card-with-details:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 2px; }
+.ring-card-choice { display: contents; cursor: pointer; }
 .equipment-slot-label { display: flex; justify-content: space-between; gap: .3rem; color: var(--muted); font-size: .63rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .equipment-slot-label small { color: var(--gold); font-size: .55rem; letter-spacing: .04em; }
 .equipment-card strong { margin-top: .25rem; color: #e8ddca; font-size: .76rem; line-height: 1.25; overflow-wrap: anywhere; }
@@ -118,11 +120,42 @@ li { margin: .3rem 0; line-height: 1.45; }
 .equipment-empty { margin: auto 0; color: var(--faint); font-size: .7rem; font-style: italic; }
 .rarity { margin-top: auto; font-size: .62rem; }
 .rarity-magic { color: #8aa8e8; }.rarity-rare { color: #e5d16f; }.rarity-unique { color: #c68750; }.rarity-normal { color: #bcbcbc; }
+.item-details-button { min-height: 1.7rem; margin-top: .35rem; padding: .15rem .35rem; border-color: #4b4133; background: transparent; color: #bba477; font-size: .58rem; letter-spacing: .04em; text-transform: uppercase; }
+.item-details-button:hover { background: #211c16; }
+.item-hover-details { position: fixed; z-index: 50; top: 50%; left: calc(50% - 9rem); width: min(22rem,calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow-y: auto; transform: translate(-100%,-50%); border: 1px solid #786342; box-shadow: 0 1rem 3rem rgba(0,0,0,.75); background: #09090b; pointer-events: none; }
+.item-details-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; align-items: end; justify-items: center; padding: 1rem; background: rgba(0,0,0,.72); }
+.item-details-dialog { position: relative; width: min(25rem,100%); max-height: calc(100vh - 2rem); overflow-y: auto; border: 1px solid #846d46; box-shadow: 0 1rem 4rem #000; background: #09090b; }
+.item-details-close { position: absolute; z-index: 1; top: .45rem; right: .45rem; min-width: 2rem; min-height: 2rem; padding: 0; border-color: #66553b; border-radius: 50%; background: rgba(8,8,10,.88); color: #dcc391; font-size: 1.25rem; }
+.item-details-content { color: #c7c1b7; font-family: Georgia,'Times New Roman',serif; text-align: center; }
+.item-detail-header { display: grid; gap: .15rem; padding: 1rem 2.8rem 1rem; border-bottom: 1px solid currentColor; color: #bcbcbc; background: linear-gradient(180deg,rgba(255,255,255,.05),transparent); }
+.item-detail-header strong { color: inherit; font-size: 1.05rem; }
+.item-detail-header span { font-size: .86rem; }
+.item-details-content.rarity-magic .item-detail-header { color: #8aa8e8; }
+.item-details-content.rarity-rare .item-detail-header { color: #e5d16f; }
+.item-details-content.rarity-unique .item-detail-header { color: #c68750; }
+.item-detail-section { padding: .55rem 1rem; border-bottom: 1px solid #39343a; }
+.item-detail-section h4 { margin: 0 0 .3rem; color: #857e74; font-family: Inter,system-ui,sans-serif; font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; }
+.item-detail-section p { margin: .14rem 0; font-size: .78rem; line-height: 1.35; white-space: pre-line; }
+.item-value-augmented { color: #8aa8e8; }
+.item-skill,.mod-implicit,.mod-enchant { color: #8aa8e8; }
+.mod-rune,.mod-crafted { color: #c9a969; }
+.mod-desecrated { color: #b58adc; }
+.item-status { margin: 0; padding: .5rem; font-weight: 700; text-align: center; }
+.unidentified { color: #d8c579; }.corrupted { color: #d55a54; }
 .equipment-file-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
 .equipment-file-actions { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); align-items: center; }
 .equipment-file-actions > * { flex: 1; white-space: nowrap; }
 .file-button { position: relative; }
 .file-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+@media (min-width: 1200px) {
+  .item-details-backdrop { align-items: center; }
+}
+@media (max-width: 900px), (hover: none) {
+  .item-hover-details { display: none; }
+  .item-details-dialog { border-radius: 8px 8px 0 0; }
+  .item-details-backdrop { padding: 2rem 0 0; }
+}
 
 .notice, .alert { margin: 0; padding: .9rem 1rem; border: 1px solid #5d4d33; border-left: 3px solid var(--gold); border-radius: 5px; background: #251f16; color: #e1cfaa; line-height: 1.45; }
 .alert code { overflow-wrap: anywhere; }

@@ -62,17 +62,30 @@ Die OpenAI-Websuche muss mindestens eine überprüfbare URL-Zitation liefern; oh
 wird keine Vorschau angeboten.
 
 `POST /api/items/evaluate` verlangt `raw_text`, `target_slot` und akzeptiert `build_id`.
-Der Provider erhält Candidate, das exakt im Zielslot ausgerüstete Item, den Zielslot,
+Der Provider erhält Candidate, die relevanten ausgerüsteten Vergleichsitems, den Zielslot,
 beobachtete Profilwerte und den vollständigen versionierten Build-Kontext.
-Ist der Zielslot leer, endet der Request vor dem Provideraufruf mit HTTP 422.
+Ein leerer einzelner Zielslot endet vor dem Provideraufruf mit HTTP 422. Bei Ring- und
+Charm-Kandidaten ist ein leerer, durch den Gürtel freigeschalteter Alternativslot dagegen ein
+gültiger, verlustfreier Vergleich;
+so kann auch das erste Item dieser Gruppe bewertet und ausgerüstet werden.
 Das strukturierte Ergebnis enthält die kompatible `recommendation` (`better`,
 `not_better`, `uncertain`) plus Urteil (`upgrade`, `sidegrade`, `downgrade`), Itemnamen,
 begrenzte Gewinne und Verluste, vier Build-Auswirkungen und eine klare Empfehlung.
 Der v2-Build mit expliziten Item-Prioritäten ist Standard; die v1-Build-ID bleibt verfügbar.
 
-Die GUI erkennt aus der Itemklasse automatisch den Zielslot. Ringe verwenden den aktuell
-gewählten Ring-Slot, ein Staff wird gemeinsam mit Wand und Fokus verglichen. Der API-Endpunkt
-verlangt `target_slot` weiterhin explizit.
+Die GUI erkennt aus der Itemklasse automatisch den Zielslot. Ringe werden unabhängig mit
+`ring_1` und `ring_2`, Charms unabhängig mit den durch den Gürtel verfügbaren Positionen
+verglichen. Die AI
+empfiehlt den besseren Ersatzslot; ein leerer Alternativslot wird deterministisch bevorzugt.
+Nur dieser eine Ring-/Charm-Slot wird ersetzt. Ein Staff wird dagegen als gemeinsames Paket
+mit Wand und Fokus verglichen und ersetzt beide Slots. Der API-Endpunkt verlangt für ältere
+Clients weiterhin einen initialen `target_slot`; `comparison_slots` beschreibt Alternativen,
+`target_slots` die tatsächlich gemeinsam ersetzten Slots.
+
+Die Charm-Kapazität wird aus dem ausgerüsteten Gürtel (`Has N Charm Slots`, maximal drei)
+abgeleitet. Ohne eindeutige Angabe gilt konservativ nur `charm_1`. Bereits belegte ältere
+Slots bleiben sichtbar und als Legacy-Kontext erhalten, sind ohne passende Gürtelkapazität
+aber kein neues Ausrüstungsziel.
 
 Der Python-Parser kennzeichnet Eingaben mit `auto_format_status` als `unchanged`, `safe`
 oder `ambiguous`. Nur konservative, insert-only Vorschläge für einzeilige Normal-/Magic-
@@ -91,13 +104,15 @@ History-/Sale-Daten und Datenbankfelder werden aus
 Kompatibilitätsgründen nicht destruktiv migriert, gehören aber nicht mehr zum aktiven UI-
 oder Bewertungsflow.
 
-Die GUI kann vollständige Equipment-Snapshots mit `schema_version: 1` oder `2` sowie das
+Die GUI kann Equipment-Snapshots mit `schema_version: 1`, `2` oder `3` sowie das
 strukturierte Slotformat mit `wand`, `focus`, `helmet`, `body_armour`, `gloves`, `boots`,
 `belt`, `ring1`, `ring2` und `amulet` atomar importieren. Importantwort und gespeicherter
-Serverzustand werden anschließend gegeneinander verifiziert. Charms im strukturierten Format
-werden erkannt, gehören aber noch nicht zu den unterstützten Equipment-Slots. Nach einem
-erfolgreichen Vergleich ersetzt „Candidate ausrüsten“ das Item im exakt verglichenen Slot;
-ein Staff belegt Wand und Fokus gemeinsam.
+Serverzustand werden anschließend gegeneinander verifiziert. v3 ergänzt `charm_1` bis
+`charm_3`; v1/v2 bleiben importierbar, neue Exporte verwenden v3. Strukturierte Legacy-Charms
+enthalten nur Identität (Rarity, Name und Base). Diese wird gespeichert, ohne Stats zu
+erfinden; belastbare Mod-Vergleiche benötigen vollständigen Itemtext. Nach einem erfolgreichen
+Vergleich ersetzt „Candidate ausrüsten“ den empfohlenen Slot; ein Staff belegt Wand und Fokus
+gemeinsam.
 
 ## Qualität
 

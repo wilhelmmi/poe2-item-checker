@@ -105,6 +105,9 @@ async def test_equipment_replace_keeps_old_item_and_separates_rings(isolated_db)
             "ring_1",
             "ring_2",
             "amulet",
+            "charm_1",
+            "charm_2",
+            "charm_3",
         }
         assert equipment["ring_1"]["id"] != equipment["ring_2"]["id"]
     with isolated_db() as db:
@@ -149,6 +152,35 @@ async def test_staff_loadout_is_atomic_and_focus_removes_staff(isolated_db) -> N
         slots = (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment")).json()["slots"]
         assert slots["wand"] is None
         assert slots["focus"]["item"]["item_class"] == "Foci"
+
+
+@pytest.mark.anyio
+async def test_direct_charm_equip_respects_belt_capacity(isolated_db) -> None:
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Charms"
+    )
+    belt = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Belts"
+    ) + "\nHas 2 Charm Slots"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        locked = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip",
+            json={"raw_text": raw, "target_slot": "charm_2"},
+        )
+        assert locked.status_code == 422
+        assert locked.json()["detail"]["code"] == "charm_slot_locked"
+        assert (await client.put(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/belt", json={"raw_text": belt}
+        )).status_code == 200
+        equipped = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip",
+            json={"raw_text": raw, "target_slot": "charm_2"},
+        )
+        assert equipped.status_code == 200, equipped.text
+        assert equipped.json()["charm_capacity"] == 2
+        assert equipped.json()["slots"]["charm_2"] is not None
 
 
 @pytest.mark.anyio
@@ -218,8 +250,9 @@ async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> N
         assert imported.status_code == 200
         assert sum(value is not None for value in imported.json()["slots"].values()) == 10
         exported = (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export")).json()
-        assert exported["schema_version"] == 2
-        assert exported["equipment_raw_text"] == seed["equipment_raw_text"]
+        assert exported["schema_version"] == 3
+        assert {key: exported["equipment_raw_text"][key] for key in seed["equipment_raw_text"]} == seed["equipment_raw_text"]
+        assert all(exported["equipment_raw_text"][f"charm_{index}"] is None for index in range(1, 4))
         exported["profile"].update(
             {"character_level": 77, "spirit_required": 120, "notes": "roundtrip"}
         )
@@ -265,7 +298,21 @@ async def test_structured_docs_import_populates_equipment_used_by_evaluate(
         imported = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=snapshot)
         assert imported.status_code == 200, imported.text
         slots = imported.json()["slots"]
-        assert all(slots[slot] is not None for slot in slots)
+        assert all(slots[slot] is not None for slot in slots if slot != "charm_3")
+        assert slots["charm_3"] is None
+        assert slots["charm_1"]["item"]["name"] == "Sanguis Heroum"
+        assert slots["charm_1"]["item"]["item_class"] == "Charms"
+        assert slots["charm_1"]["item"]["modifiers"] == []
+        exported = (await client.get(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export"
+        )).json()
+        assert exported["schema_version"] == 3
+        reimported = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=exported
+        )
+        assert reimported.status_code == 200, reimported.text
+        assert reimported.json()["slots"]["charm_1"]["item"]["name"] == "Sanguis Heroum"
+        assert reimported.json()["slots"]["charm_1"]["item"]["modifiers"] == []
         assert slots["ring_1"]["item"]["name"] == "Skull Knot"
         assert slots["ring_2"]["item"]["name"] == "Pandemonium Nail"
         for source_slot, stored_slot in {

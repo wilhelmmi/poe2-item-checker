@@ -6,7 +6,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('Equipment-Dateien', () => {
   const slots = Object.fromEntries(
-    ['wand', 'focus', 'helmet', 'body_armour', 'gloves', 'boots', 'belt', 'ring_1', 'ring_2', 'amulet']
+    ['wand', 'focus', 'helmet', 'body_armour', 'gloves', 'boots', 'belt', 'ring_1', 'ring_2', 'amulet', 'charm_1', 'charm_2', 'charm_3']
       .map(slot => [slot, null]),
   )
   it('löscht Builds über die kodierte Build-ID', async () => {
@@ -32,11 +32,11 @@ describe('Equipment-Dateien', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('akzeptiert nur Schema v1 oder v2 vor einem Request', async () => {
+  it('akzeptiert nur Schema v1, v2 oder v3 vor einem Request', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const file = { size: 30, text: async () => JSON.stringify({ schema_version: 3 }) } as File
-    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('schema_version 1 oder 2')
+    const file = { size: 30, text: async () => JSON.stringify({ schema_version: 4 }) } as File
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('schema_version 1, 2 oder 3')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -53,7 +53,7 @@ describe('Equipment-Dateien', () => {
     vi.stubGlobal('fetch', fetchMock)
     const file = { size: 500, text: async () => JSON.stringify(structured) } as File
 
-    await expect(importEquipmentFile('build-a',file)).resolves.toEqual({ ...equipment, ignoredCharms: 1 })
+    await expect(importEquipmentFile('build-a',file)).resolves.toEqual(equipment)
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual(structured)
   })
 
@@ -121,18 +121,18 @@ describe('Equipment-Dateien', () => {
     await expect(importEquipmentFile('build-a',file)).rejects.toThrow(message)
   })
 
-  it('verlangt beim Download einen vollständigen v2-Export', async () => {
+  it('verlangt beim Download einen vollständigen v3-Export', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ schema_version: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
-    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v2-Export')
+    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v3-Export')
   })
 
   it('weist null als Top-Level-Export sicher zurück', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       'null', { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
-    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v2-Export')
+    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v3-Export')
   })
 
   it.each([
@@ -141,16 +141,16 @@ describe('Equipment-Dateien', () => {
     ['ungültiger Slotwert', { ...slots, wand: 42 }],
   ])('weist einen Export mit %s zurück', async (_label, equipment_raw_text) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      schema_version: 2, profile: {}, equipment_raw_text,
+      schema_version: 3, profile: {}, equipment_raw_text,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v2-Export')
+    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v3-Export')
   })
 
-  it('akzeptiert einen vollständigen v2-Export', async () => {
+  it('akzeptiert einen vollständigen v3-Export', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      schema_version: 2, profile: {}, equipment_raw_text: slots,
+      schema_version: 3, profile: {}, equipment_raw_text: slots,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    await expect(exportEquipmentFile('build-a')).resolves.toMatchObject({ schema_version: 2, equipment_raw_text: slots })
+    await expect(exportEquipmentFile('build-a')).resolves.toMatchObject({ schema_version: 3, equipment_raw_text: slots })
   })
 
   it('validiert Equipment-Zustände strukturell', () => {

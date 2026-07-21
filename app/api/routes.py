@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.evaluation.provider import EvaluationProviderError
-from app.evaluation.schemas import EvaluateItemRequest, EvaluateItemResponse, EvaluationInput
+from app.evaluation.schemas import (
+    BuildImpacts,
+    EvaluateItemRequest,
+    EvaluateItemResponse,
+    EvaluationInput,
+    EvaluationResult,
+)
 from app.evaluation.service import get_evaluation_provider
 from app.builds.registry import BuildContext
 from app.builds.provider_service import get_build_provider
@@ -25,6 +31,8 @@ from app.equipment.service import (
     put_profile,
     replace_equipment,
     equip_loadout,
+    comparison_slots,
+    charm_slot_context,
 )
 
 from app.parser.service import (
@@ -177,6 +185,10 @@ async def put_equipment(
 ) -> EquipmentItem:
     try:
         require_build(db, build_id)
+        if slot.startswith("charm_"):
+            _, available, _ = charm_slot_context(db, build_id)
+            if slot not in available:
+                raise ValueError("charm_slot_locked")
         return replace_equipment(db, slot, data.raw_text, build_id)
     except ValueError as exc:
         db.rollback()
@@ -187,7 +199,7 @@ async def put_equipment(
 async def equip_item(build_id: str, data: EquipmentEquip, db: Session = Depends(database)) -> EquipmentResponse:
     try:
         require_build(db, build_id)
-        return equip_loadout(db, data.raw_text, data.ring_slot, build_id)
+        return equip_loadout(db, data.raw_text, data.target_slot or data.ring_slot, build_id)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
@@ -272,16 +284,38 @@ async def evaluate_item(
         ) from exc
     from app.equipment.service import item_schema, profile_schema
 
-    target_slots: list[Slot] = ["wand", "focus"] if is_staff else [request.target_slot]
+    candidate_comparison_slots = list(comparison_slots(parsed.item.item_class or ""))
+    available_target_slots = list(candidate_comparison_slots)
+    if parsed.item.item_class == "Charms":
+        _, available, charm_comparisons = charm_slot_context(db, request.build_id)
+        available_target_slots = list(available)
+        candidate_comparison_slots = list(charm_comparisons)
+        if request.target_slot not in available_target_slots:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "charm_slot_locked",
+                    "message": "Der gewählte Charm-Slot ist durch den aktuellen Gürtel gesperrt.",
+                },
+            )
+    if not candidate_comparison_slots:
+        raise HTTPException(422, detail={"code": "unsupported_item_class"})
+    is_alternative = parsed.item.item_class in {"Rings", "Charms"}
+    selected_target = request.target_slot
+    target_slots: list[Slot] = ["wand", "focus"] if is_staff else [selected_target]
     equipped_slots: dict[Slot, ParsedItem | None] = {}
-    for target in target_slots:
+    for target in candidate_comparison_slots:
         row = db.get(EquipmentSlot, (1, request.build_id, target))
         equipped_orm = db.get(Item, row.item_id) if row and row.item_id else None
         equipped_slots[target] = item_schema(equipped_orm) if equipped_orm else None
-    equipped = equipped_slots[request.target_slot]
-    if equipped is None and is_staff:
-        equipped = equipped_slots["focus"]
-    if equipped is None:
+    empty_slots = [slot for slot in available_target_slots if equipped_slots[slot] is None]
+    if is_alternative and empty_slots:
+        selected_target = empty_slots[0]
+        target_slots = [selected_target]
+    equipped = equipped_slots.get(selected_target)
+    if equipped is None and not is_alternative:
+        equipped = next((item for item in equipped_slots.values() if item is not None), None)
+    if equipped is None and not is_alternative:
         raise HTTPException(
             status_code=422,
             detail={
@@ -294,42 +328,80 @@ async def evaluate_item(
         candidate=parsed.item,
         equipped=equipped,
         equipped_slots=equipped_slots,
-        target_slot=request.target_slot,
+        target_slot=selected_target,
         target_slots=target_slots,
+        comparison_slots=candidate_comparison_slots,
+        available_target_slots=available_target_slots,
         observed_profile=profile_schema(profile) if profile else None,
         build=build,
     )
-    try:
-        provider = get_evaluation_provider()
-        evaluation = await provider.evaluate(evaluation_input)
-    except EvaluationProviderError as exc:
-        return EvaluateItemResponse(
-            parse=parsed,
-            build=build,
-            target_slot=request.target_slot,
-            equipped=equipped,
-            equipped_slots=equipped_slots,
-            target_slots=target_slots,
-            evaluation=None,
-            provider=None,
-            model=None,
-            provider_status="unavailable",
-            provider_error={"code": exc.code, "message": exc.public_message},
-            disclaimer=(
-                "API-Empfehlung nicht verfügbar. Es wurde keine lokale Empfehlung "
-                "oder Ersatzbewertung erzeugt."
+    provider = None
+    if is_alternative and equipped is None:
+        slot_label = selected_target.replace("_", " ").title()
+        evaluation = EvaluationResult(
+            recommendation="better",
+            confidence="high",
+            reasons=[f"{slot_label} ist frei; beim Ausrüsten gehen keine Itemwerte verloren."],
+            verdict="upgrade",
+            current_item_name=f"Leerer {slot_label}",
+            new_item_name=parsed.item.name or parsed.item.base_type or "Neues Item",
+            gains=["Ein bisher leerer Ausrüstungsplatz wird belegt."],
+            losses=[],
+            impacts=BuildImpacts(
+                damage="similar", defensive="similar", resistances="similar", utility="better"
             ),
+            clear_recommendation="Ausrüsten, da der Zielslot frei ist und keine Werte verloren gehen.",
+            recommended_target_slot=selected_target,
         )
+    else:
+        try:
+            provider = get_evaluation_provider()
+            evaluation = await provider.evaluate(evaluation_input)
+        except EvaluationProviderError as exc:
+            return EvaluateItemResponse(
+                parse=parsed,
+                build=build,
+                target_slot=selected_target,
+                equipped=equipped,
+                equipped_slots=equipped_slots,
+                target_slots=target_slots,
+                comparison_slots=candidate_comparison_slots,
+                available_target_slots=available_target_slots,
+                evaluation=None,
+                provider=None,
+                model=None,
+                provider_status="unavailable",
+                provider_error={"code": exc.code, "message": exc.public_message},
+                disclaimer=(
+                    "API-Empfehlung nicht verfügbar. Es wurde keine lokale Empfehlung "
+                    "oder Ersatzbewertung erzeugt."
+                ),
+            )
+    if is_alternative:
+        if empty_slots and evaluation.recommended_target_slot == selected_target:
+            pass
+        elif not empty_slots and evaluation.recommended_target_slot in available_target_slots:
+            selected_target = evaluation.recommended_target_slot
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "invalid_provider_response", "message": (
+                    "Die AI-Bewertung hat keinen gültigen Ersatzslot empfohlen."
+                )},
+            )
+        target_slots = [selected_target]
     return EvaluateItemResponse(
         parse=parsed,
         build=build,
-        target_slot=request.target_slot,
+        target_slot=selected_target,
         equipped=equipped,
         equipped_slots=equipped_slots,
         target_slots=target_slots,
+        comparison_slots=candidate_comparison_slots,
+        available_target_slots=available_target_slots,
         evaluation=evaluation,
-        provider=provider.name,
-        model=provider.model,
+        provider=provider.name if provider else "system",
+        model=provider.model if provider else "empty-slot-rule",
         provider_status="success",
         provider_error=None,
         disclaimer=(
