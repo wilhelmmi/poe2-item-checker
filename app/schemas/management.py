@@ -4,8 +4,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.items import ParsedItem
 
-Slot = Literal["wand", "focus", "helmet", "body_armour", "gloves", "boots", "belt", "ring_1", "ring_2", "amulet"]
-SLOTS: tuple[Slot, ...] = ("wand", "focus", "helmet", "body_armour", "gloves", "boots", "belt", "ring_1", "ring_2", "amulet")
+Slot = Literal["wand", "focus", "helmet", "body_armour", "gloves", "boots", "belt", "ring_1", "ring_2", "amulet", "charm_1", "charm_2", "charm_3"]
+SLOTS: tuple[Slot, ...] = ("wand", "focus", "helmet", "body_armour", "gloves", "boots", "belt", "ring_1", "ring_2", "amulet", "charm_1", "charm_2", "charm_3")
+LEGACY_SLOTS = SLOTS[:-3]
 
 
 class StrictModel(BaseModel):
@@ -40,6 +41,8 @@ class EquipmentItem(StrictModel):
 
 class EquipmentResponse(StrictModel):
     slots: dict[Slot, EquipmentItem | None]
+    charm_capacity: int = Field(default=1, ge=1, le=3)
+    available_charm_slots: list[Slot] = Field(default_factory=lambda: ["charm_1"])
 
 
 class EquipmentPut(StrictModel):
@@ -51,6 +54,7 @@ class EquipmentEquip(StrictModel):
 
     raw_text: str = Field(min_length=1, max_length=50_000)
     ring_slot: Literal["ring_1", "ring_2"] = "ring_1"
+    target_slot: Slot | None = None
 
 
 class SeedProfile(StrictModel):
@@ -83,14 +87,15 @@ class EquipmentImport(StrictModel):
 
 
 class EquipmentExport(StrictModel):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2, 3] = 3
     profile: ProfileData
     equipment_raw_text: dict[Slot, str | None]
 
     @model_validator(mode="after")
     def require_complete_slot_snapshot(self) -> "EquipmentExport":
-        if set(self.equipment_raw_text) != set(SLOTS):
-            raise ValueError("equipment_raw_text must contain all equipment slots")
+        expected = LEGACY_SLOTS if self.schema_version == 2 else SLOTS
+        if set(self.equipment_raw_text) != set(expected):
+            raise ValueError("equipment_raw_text must contain all slots for its schema version")
         return self
 
 

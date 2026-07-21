@@ -47,30 +47,45 @@ Im Build-Bereich kann eine öffentliche `http(s)`-URL analysiert werden. Der Ser
 URL nicht selbst, sondern übergibt sie der OpenAI Responses API mit Websuche und einem strikten
 Ausgabeschema. Private IP-Adressen, localhost, Zugangsdaten und URL-Fragmente werden abgewiesen.
 Ergebnisfelder und die tatsächlich vom Provider gelieferten URL-Zitate erscheinen zuerst als
-Vorschau. Erst die Bestätigung speichert exakt diese Vorschau als versionierten Custom-Build.
-Custom-Builds und die aktive Auswahl bleiben in der Datenbank erhalten.
+Vorschau. Erst die Bestätigung speichert exakt diese Vorschau als versionierten Build.
+Alle Builds – auch die beiden mitgelieferten – sind datenbankbasiert und löschbar. Wird der
+letzte Build gelöscht, bleibt die Auswahl leer, bis wieder eine Vorschau bestätigt wird.
 
 - `POST /api/builds/previews` analysiert `{ "source_url": "…" }`.
 - `POST /api/builds/previews/{id}/confirm` bestätigt eine gültige Vorschau idempotent.
 - `GET /api/builds` liefert eingebaute und eigene Builds weiterhin als Liste.
 - `GET /api/builds/active` und `PUT /api/builds/active` verwalten die aktive Auswahl.
+- `DELETE /api/builds/{build_id}` löscht den Build samt zugeordnetem Equipment.
 
 Die Build-Analyse benötigt wie die Itembewertung einen konfigurierten `OPENAI_API_KEY`.
 Die OpenAI-Websuche muss mindestens eine überprüfbare URL-Zitation liefern; ohne Zitation
 wird keine Vorschau angeboten.
 
 `POST /api/items/evaluate` verlangt `raw_text`, `target_slot` und akzeptiert `build_id`.
-Der Provider erhält Candidate, das exakt im Zielslot ausgerüstete Item, den Zielslot,
+Der Provider erhält Candidate, die relevanten ausgerüsteten Vergleichsitems, den Zielslot,
 beobachtete Profilwerte und den vollständigen versionierten Build-Kontext.
-Ist der Zielslot leer, endet der Request vor dem Provideraufruf mit HTTP 422.
+Ein leerer einzelner Zielslot endet vor dem Provideraufruf mit HTTP 422. Bei Ring- und
+Charm-Kandidaten ist ein leerer, durch den Gürtel freigeschalteter Alternativslot dagegen ein
+gültiger, verlustfreier Vergleich;
+so kann auch das erste Item dieser Gruppe bewertet und ausgerüstet werden.
 Das strukturierte Ergebnis enthält die kompatible `recommendation` (`better`,
 `not_better`, `uncertain`) plus Urteil (`upgrade`, `sidegrade`, `downgrade`), Itemnamen,
 begrenzte Gewinne und Verluste, vier Build-Auswirkungen und eine klare Empfehlung.
 Der v2-Build mit expliziten Item-Prioritäten ist Standard; die v1-Build-ID bleibt verfügbar.
 
-Die GUI erkennt aus der Itemklasse automatisch den Zielslot. Ringe verwenden den aktuell
-gewählten Ring-Slot, ein Staff wird gemeinsam mit Wand und Fokus verglichen. Der API-Endpunkt
-verlangt `target_slot` weiterhin explizit.
+Die GUI erkennt aus der Itemklasse automatisch den Zielslot. Ringe werden unabhängig mit
+`ring_1` und `ring_2`, Charms unabhängig mit den durch den Gürtel verfügbaren Positionen
+verglichen. Die AI
+empfiehlt den besseren Ersatzslot; ein leerer Alternativslot wird deterministisch bevorzugt.
+Nur dieser eine Ring-/Charm-Slot wird ersetzt. Ein Staff wird dagegen als gemeinsames Paket
+mit Wand und Fokus verglichen und ersetzt beide Slots. Der API-Endpunkt verlangt für ältere
+Clients weiterhin einen initialen `target_slot`; `comparison_slots` beschreibt Alternativen,
+`target_slots` die tatsächlich gemeinsam ersetzten Slots.
+
+Die Charm-Kapazität wird aus dem ausgerüsteten Gürtel (`Has N Charm Slots`, maximal drei)
+abgeleitet. Ohne eindeutige Angabe gilt konservativ nur `charm_1`. Bereits belegte ältere
+Slots bleiben sichtbar und als Legacy-Kontext erhalten, sind ohne passende Gürtelkapazität
+aber kein neues Ausrüstungsziel.
 
 Der Python-Parser kennzeichnet Eingaben mit `auto_format_status` als `unchanged`, `safe`
 oder `ambiguous`. Nur konservative, insert-only Vorschläge für einzeilige Normal-/Magic-
@@ -79,18 +94,25 @@ Rare-/Unique-Items bleiben immer `ambiguous` und müssen manuell geprüft werden
 eine sichere Änderung als Hinweis; mehrdeutige Vorschläge werden nie automatisch an den
 Provider gesendet oder als Equipment gespeichert.
 
-`GET /api/builds` liefert die auswählbaren Build-Versionen. Profil- und Equipment-Endpunkte
-bleiben bestehen. Alte History-/Sale-Daten und Datenbankfelder werden aus
+`GET /api/builds` liefert die auswählbaren Build-Versionen. Equipment wird strikt je Build
+unter `/api/builds/{build_id}/equipment` verwaltet; Import, Export und Ausrüsten verwenden
+dieselbe Basis-URL. Alte Exporte bleiben beim Import kompatibel und werden dem ausgewählten
+Build zugeordnet. Profilwerte und bestehende History-/Sale-Daten bleiben vorerst global. Die
+Legacy-Backupfunktion arbeitet nur mit dem aktiven Build und verweigert Restore bei Equipment
+weiterer Builds, damit kein fremdes Loadout überschrieben wird. Alte
+History-/Sale-Daten und Datenbankfelder werden aus
 Kompatibilitätsgründen nicht destruktiv migriert, gehören aber nicht mehr zum aktiven UI-
 oder Bewertungsflow.
 
-Die GUI kann vollständige Equipment-Snapshots mit `schema_version: 1` oder `2` sowie das
+Die GUI kann Equipment-Snapshots mit `schema_version: 1`, `2` oder `3` sowie das
 strukturierte Slotformat mit `wand`, `focus`, `helmet`, `body_armour`, `gloves`, `boots`,
 `belt`, `ring1`, `ring2` und `amulet` atomar importieren. Importantwort und gespeicherter
-Serverzustand werden anschließend gegeneinander verifiziert. Charms im strukturierten Format
-werden erkannt, gehören aber noch nicht zu den unterstützten Equipment-Slots. Nach einem
-erfolgreichen Vergleich ersetzt „Candidate ausrüsten“ das Item im exakt verglichenen Slot;
-ein Staff belegt Wand und Fokus gemeinsam.
+Serverzustand werden anschließend gegeneinander verifiziert. v3 ergänzt `charm_1` bis
+`charm_3`; v1/v2 bleiben importierbar, neue Exporte verwenden v3. Strukturierte Legacy-Charms
+enthalten nur Identität (Rarity, Name und Base). Diese wird gespeichert, ohne Stats zu
+erfinden; belastbare Mod-Vergleiche benötigen vollständigen Itemtext. Nach einem erfolgreichen
+Vergleich ersetzt „Candidate ausrüsten“ den empfohlenen Slot; ein Staff belegt Wand und Fokus
+gemeinsam.
 
 ## Qualität
 

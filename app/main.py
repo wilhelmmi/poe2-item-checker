@@ -14,7 +14,7 @@ app.include_router(router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    if request.url.path == "/api/equipment/import":
+    if request.url.path.endswith("/equipment/import"):
         return JSONResponse(
             status_code=422,
             content={

@@ -1,6 +1,6 @@
 # Projektstatus
 
-Stand: 2026-07-20 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt und validiert.
+Stand: 2026-07-21 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt und validiert.
 
 ## Aktives Produkt
 
@@ -18,7 +18,7 @@ Stand: 2026-07-20 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt u
 - Das Slot-Eingabefeld formatiert vollständige Paste-Eingaben sofort sichtbar. Mehrdeutige
   Texte werden nur soweit sicher möglich strukturiert und bleiben vor dem Speichern prüfbar.
 - Bulk-Imports bleiben verlustfrei und werden nicht stillschweigend autoformatiert.
-- Der vollständige v1/v2-Equipmentimport und das strukturierte Slotformat ohne
+- Der v1/v2/v3-Equipmentimport und das strukturierte Slotformat ohne
   `schema_version` sind implementiert. Importantwort und gespeicherter Zustand werden durch
   ein anschließendes `GET /api/equipment` verifiziert. Der reale GUI-Smoke-Test ist erfolgt.
 - Nach einer erfolgreichen API-Empfehlung kann der Candidate explizit ausgerüstet werden.
@@ -32,12 +32,20 @@ Stand: 2026-07-20 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt u
   bzw. Utility-Werte in fester Reihenfolge; schwache Stats sind explizit niedriger gewichtet.
 - Die strukturierte Antwort liefert Gewinne, Verluste, vier Build-Auswirkungen, ein konsistentes
   Upgrade-/Sidegrade-/Downgrade-Urteil und eine klare Ausrüstungsempfehlung. v1 bleibt abrufbar.
-- Die GUI erkennt den Candidate-Slot aus der Itemklasse automatisch. Ein Staff wird gegen
-  Wand und Fokus gemeinsam verglichen und ersetzt beim Ausrüsten beide Slots atomar.
+- Die GUI erkennt den Candidate-Slot aus der Itemklasse automatisch. Ringe werden mit beiden
+  Ringpositionen und Charms mit maximal drei Charmpositionen verglichen; die AI benennt den
+  empfohlenen Ersatzslot, ein leerer Alternativslot wird bevorzugt. Alternative Positionen
+  werden nie gemeinsam ersetzt. Ein Staff wird gegen Wand und Fokus als gemeinsames Paket
+  verglichen und ersetzt beim Ausrüsten beide Slots atomar.
+- Charm-Slots werden durch die explizite Kapazität des ausgerüsteten Gürtels freigeschaltet
+  (maximal drei, konservativer Fallback `charm_1`). Gesperrte leere Slots sind keine
+  Vergleichs- oder Ausrüstungsziele; belegte Legacy-Slots bleiben sichtbar.
 - Öffentliche Build-Links werden über die OpenAI-Websuche analysiert. Nur Analysen mit
   überprüfbaren URL-Zitationen werden als Vorschau angeboten; erst die Bestätigung speichert
-  einen versionierten Custom Build. Custom Builds und die aktive Auswahl bleiben persistent.
-- Ein leerer Zielslot wird vor dem Provideraufruf mit `equipped_item_required` abgewiesen.
+  einen versionierten Build. Alle Builds sind DB-basiert und löschbar; null Builds sind zulässig.
+- Ein leerer einzelner Zielslot wird mit `equipped_item_required` abgewiesen. Leere Ring- und
+  durch den Gürtel freigeschaltete Charm-Alternativslots sind gültig und werden als
+  verlustfreies erstmaliges Ausrüsten bewertet.
 - Item-Rohtext, unbekannte Rohzeilen, Modifier-Rohtext sowie Profilname und -notizen werden
   nicht an den Provider übertragen. Beobachtete Prozent-Modifier, sachliche Trade-offs und
   die Tatsache eines crafted Modifiers sind in Gründen erlaubt. Unbelegte relative
@@ -47,10 +55,13 @@ Stand: 2026-07-20 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt u
 
 ## Build-Registry
 
-Eingebaut sind `deadrabb1t-chaos-dot-lich-starter-v1` für Kompatibilität und
-`deadrabb1t-chaos-dot-lich-starter-v2` als Standard, jeweils `default-variant`,
+Bei Migration 0006 werden `deadrabb1t-chaos-dot-lich-starter-v1` für Kompatibilität und
+`deadrabb1t-chaos-dot-lich-starter-v2` als Standard in der Datenbank angelegt, jeweils `default-variant`,
 ED/Contagion Chaos DoT Lich Starter von DEADRABB1T. Bestätigte Link-Analysen werden als
-weitere versionierte Custom Builds gespeichert; Request und UI führen `build_id`.
+weitere versionierte Builds gespeichert; Request und UI führen `build_id`. Equipment ist
+über diese ID vollständig getrennt. Profilwerte und gespeicherte Evaluationen bleiben global;
+die nicht mehr im UI angebotene Legacy-Backup-/Local-History-Logik liest nur Equipment des
+aktiven Builds und verweigert einen mehrdeutigen Multi-Build-Restore sicher.
 
 ## Kompatibilität
 
@@ -78,9 +89,9 @@ Die Dokumentation ist korrigiert. Zusätzlich verifiziert die GUI einen Import d
 anschließendes
 `GET /api/equipment`, validiert beide Serverantworten und zeigt Schema-, Slot- oder
 Persistenzabweichungen verständlich an, statt einen nicht bestätigten Erfolg zu melden.
-Der reale Ende-zu-Ende-Test mit vollständigem strukturiertem Equipment, belegten zehn Slots
-und anschließendem Candidate-Vergleich war erfolgreich. Charms werden erkannt und bewusst
-nicht als Equipment-Slots gespeichert.
+Der strukturierte Import speichert zusätzlich bis zu drei Charms. Da dieses Legacy-Format
+für Charms nur Rarity, Name und Base enthält, bleiben deren Modifier bewusst leer; es werden
+keine Stats erfunden. Vollständige v3-Snapshots exportieren alle 13 Slots.
 
 ## Nächster Meilenstein
 

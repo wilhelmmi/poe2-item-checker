@@ -1,7 +1,10 @@
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import CharacterProfile, EquipmentSlot, Item, Modifier
+from app.builds.registry import DEFAULT_BUILD_ID
 from app.parser.service import (
     BLOCKING_WARNING_CODES,
     parse_with_safe_auto_format,
@@ -32,14 +35,55 @@ SLOT_CLASSES = {
     "ring_1": "Rings",
     "ring_2": "Rings",
     "amulet": "Amulets",
+    "charm_1": "Charms",
+    "charm_2": "Charms",
+    "charm_3": "Charms",
 }
 
 
-def item_slots(item_class: str, ring_slot: Slot = "ring_1") -> tuple[Slot, ...]:
+def comparison_slots(item_class: str) -> tuple[Slot, ...]:
+    if item_class == "Rings":
+        return ("ring_1", "ring_2")
+    if item_class == "Charms":
+        return ("charm_1", "charm_2", "charm_3")
+    if item_class == "Staves":
+        return ("wand", "focus")
+    return tuple(slot for slot, expected in SLOT_CLASSES.items() if expected == item_class)[:1]
+
+
+def belt_charm_capacity(item: ParsedItem | None) -> int:
+    """Return the explicit belt capacity, conservatively defaulting to one slot."""
+    if item is None:
+        return 1
+    texts = [modifier.raw_text for modifier in item.modifiers]
+    texts.append(item.raw_text)
+    for text in texts:
+        match = re.search(r"(?:Has\s+)?([1-3])(?:\([^\n)]*\))?\s+Charm Slots?\b", text, re.I)
+        if match:
+            return min(3, max(1, int(match.group(1))))
+    return 1
+
+
+def charm_slot_context(db: Session, build_id: str) -> tuple[int, tuple[Slot, ...], tuple[Slot, ...]]:
+    belt_row = db.get(EquipmentSlot, (1, build_id, "belt"))
+    belt = db.get(Item, belt_row.item_id) if belt_row and belt_row.item_id else None
+    capacity = belt_charm_capacity(item_schema(belt) if belt else None)
+    available: tuple[Slot, ...] = tuple(f"charm_{index}" for index in range(1, capacity + 1))  # type: ignore[assignment]
+    occupied = tuple(
+        slot for slot in ("charm_1", "charm_2", "charm_3")
+        if (row := db.get(EquipmentSlot, (1, build_id, slot))) is not None and row.item_id
+    )
+    comparison = tuple(dict.fromkeys((*available, *occupied)))
+    return capacity, available, comparison
+
+
+def item_slots(item_class: str, target_slot: Slot = "ring_1") -> tuple[Slot, ...]:
     if item_class == "Staves":
         return ("wand", "focus")
     if item_class == "Rings":
-        return (ring_slot,)
+        return (target_slot,) if target_slot in {"ring_1", "ring_2"} else ()
+    if item_class == "Charms":
+        return (target_slot,) if target_slot in {"charm_1", "charm_2", "charm_3"} else ()
     return tuple(slot for slot, expected in SLOT_CLASSES.items() if expected == item_class)[:1]
 
 
@@ -78,6 +122,17 @@ def parse_equipment(raw_text: str, *, auto_format: bool = False) -> ParsedItem:
     return parsed.item
 
 
+def parse_import_item(slot: Slot, raw_text: str) -> ParsedItem:
+    parsed = parse_with_warnings(raw_text)
+    if slot.startswith("charm_") and parsed.item.item_class == "Charms":
+        blocking = {warning.code for warning in parsed.warnings} & BLOCKING_WARNING_CODES
+        # Structured legacy charms and their v3 exports contain identity only.
+        # Permit exactly that known limitation, but retain every other parser guard.
+        if blocking <= {"no_modifiers_detected"}:
+            return parsed.item
+    return parse_equipment(raw_text)
+
+
 def store_item(db: Session, parsed: ParsedItem) -> Item:
     values = parsed.model_dump(exclude={"modifiers"})
     item = Item(**values)
@@ -100,8 +155,10 @@ def item_schema(item: Item) -> ParsedItem:
     return ParsedItem.model_validate(values)
 
 
-def equipment_response(db: Session) -> EquipmentResponse:
-    rows = db.execute(select(EquipmentSlot).where(EquipmentSlot.character_id == 1)).scalars()
+def equipment_response(db: Session, build_id: str = DEFAULT_BUILD_ID) -> EquipmentResponse:
+    rows = db.execute(select(EquipmentSlot).where(
+        EquipmentSlot.character_id == 1, EquipmentSlot.build_id == build_id
+    )).scalars()
     mapping = {row.slot: row for row in rows}
     slots: dict[Slot, EquipmentItem | None] = {}
     for slot in SLOTS:
@@ -111,10 +168,13 @@ def equipment_response(db: Session) -> EquipmentResponse:
         else:
             item = db.get(Item, row.item_id) if row.item_id else None
             slots[slot] = EquipmentItem(id=item.id, item=item_schema(item)) if item else None
-    return EquipmentResponse(slots=slots)
+    capacity, available, _ = charm_slot_context(db, build_id)
+    return EquipmentResponse(
+        slots=slots, charm_capacity=capacity, available_charm_slots=list(available)
+    )
 
 
-def replace_equipment(db: Session, slot: Slot, raw_text: str) -> EquipmentItem:
+def replace_equipment(db: Session, slot: Slot, raw_text: str, build_id: str = DEFAULT_BUILD_ID) -> EquipmentItem:
     parsed = parse_equipment(raw_text, auto_format=True)
     if parsed.item_class == "Staves" and slot == "wand":
         pass
@@ -122,9 +182,9 @@ def replace_equipment(db: Session, slot: Slot, raw_text: str) -> EquipmentItem:
         raise ValueError("item_slot_mismatch")
     get_or_create_profile(db)
     item = store_item(db, parsed)
-    row = db.get(EquipmentSlot, (1, slot))
+    row = db.get(EquipmentSlot, (1, build_id, slot))
     if row is None:
-        row = EquipmentSlot(character_id=1, slot=slot, item_id=item.id)
+        row = EquipmentSlot(character_id=1, build_id=build_id, slot=slot, item_id=item.id)
         db.add(row)
     else:
         row.item_id = item.id
@@ -132,25 +192,29 @@ def replace_equipment(db: Session, slot: Slot, raw_text: str) -> EquipmentItem:
     # focus removes an existing staff so no illegal staff+focus state can be committed.
     conflicting_slot = "focus" if parsed.item_class == "Staves" else "wand" if slot == "focus" else None
     if conflicting_slot:
-        conflict = db.get(EquipmentSlot, (1, conflicting_slot))
+        conflict = db.get(EquipmentSlot, (1, build_id, conflicting_slot))
         if parsed.item_class == "Staves" or (
             conflict and conflict.item_id and item_schema(db.get(Item, conflict.item_id)).item_class == "Staves"
         ):
             if conflict is None:
-                db.add(EquipmentSlot(character_id=1, slot=conflicting_slot, item_id=None))
+                db.add(EquipmentSlot(character_id=1, build_id=build_id, slot=conflicting_slot, item_id=None))
             else:
                 conflict.item_id = None
     db.commit()
     return EquipmentItem(id=item.id, item=item_schema(item))
 
 
-def equip_loadout(db: Session, raw_text: str, ring_slot: Slot = "ring_1") -> EquipmentResponse:
+def equip_loadout(db: Session, raw_text: str, target_slot: Slot = "ring_1", build_id: str = DEFAULT_BUILD_ID) -> EquipmentResponse:
     parsed = parse_equipment(raw_text, auto_format=True)
-    targets = item_slots(parsed.item_class or "", ring_slot)
+    targets = item_slots(parsed.item_class or "", target_slot)
     if not targets:
         raise ValueError("unsupported_item_class")
-    replace_equipment(db, targets[0], parsed.raw_text)
-    return equipment_response(db)
+    if parsed.item_class == "Charms":
+        _, available, _ = charm_slot_context(db, build_id)
+        if target_slot not in available:
+            raise ValueError("charm_slot_locked")
+    replace_equipment(db, targets[0], parsed.raw_text, build_id)
+    return equipment_response(db, build_id)
 
 
 def structured_item_text(item: StructuredEquipmentItem) -> str:
@@ -174,21 +238,29 @@ def structured_equipment_text(data: StructuredEquipmentImport) -> dict[Slot, str
     source = data.model_dump()
     source["ring_1"] = source.pop("ring1")
     source["ring_2"] = source.pop("ring2")
-    source.pop("charms")
-    return {
+    charms = source.pop("charms")
+    result: dict[Slot, str] = {
         slot: structured_item_text(StructuredEquipmentItem.model_validate(source[slot]))
-        for slot in SLOTS
+        for slot in SLOTS if not slot.startswith("charm_")
     }
+    for index, charm in enumerate(charms, start=1):
+        # Legacy structured charms contain identity only. Preserve precisely that
+        # information; no modifiers or stats are inferred.
+        result[f"charm_{index}"] = "\n".join((
+            "Item Class: Charms", f"Rarity: {charm['rarity']}",
+            charm["name"], charm["base"],
+        ))
+    return result
 
 
-def import_equipment(db: Session, data: EquipmentImportData) -> EquipmentResponse:
+def import_equipment(db: Session, data: EquipmentImportData, build_id: str = DEFAULT_BUILD_ID) -> EquipmentResponse:
     raw_text = (
         structured_equipment_text(data)
         if isinstance(data, StructuredEquipmentImport)
         else data.equipment_raw_text
     )
     parsed = {
-        slot: parse_equipment(raw)
+        slot: parse_import_item(slot, raw)
         for slot, raw in raw_text.items()
         if raw is not None
     }
@@ -215,9 +287,9 @@ def import_equipment(db: Session, data: EquipmentImportData) -> EquipmentRespons
             setattr(profile, key, value)
     for slot, item_data in parsed.items():
         item = store_item(db, item_data)
-        row = db.get(EquipmentSlot, (1, slot))
+        row = db.get(EquipmentSlot, (1, build_id, slot))
         if row is None:
-            db.add(EquipmentSlot(character_id=1, slot=slot, item_id=item.id))
+            db.add(EquipmentSlot(character_id=1, build_id=build_id, slot=slot, item_id=item.id))
         else:
             row.item_id = item.id
     # Partial v1 imports obey the same deterministic hand-slot semantics as
@@ -225,31 +297,31 @@ def import_equipment(db: Session, data: EquipmentImportData) -> EquipmentRespons
     # focus clears an already equipped staff. A payload containing both conflicts
     # and is rejected above rather than depending on mapping order.
     if imported_staff:
-        focus_row = db.get(EquipmentSlot, (1, "focus"))
+        focus_row = db.get(EquipmentSlot, (1, build_id, "focus"))
         if focus_row is None:
-            db.add(EquipmentSlot(character_id=1, slot="focus", item_id=None))
+            db.add(EquipmentSlot(character_id=1, build_id=build_id, slot="focus", item_id=None))
         else:
             focus_row.item_id = None
     elif imported_focus:
-        wand_row = db.get(EquipmentSlot, (1, "wand"))
+        wand_row = db.get(EquipmentSlot, (1, build_id, "wand"))
         wand_item = db.get(Item, wand_row.item_id) if wand_row and wand_row.item_id else None
         if wand_item is not None and item_schema(wand_item).item_class == "Staves":
             wand_row.item_id = None
-    if not isinstance(data, StructuredEquipmentImport) and data.schema_version == 2:
+    if not isinstance(data, StructuredEquipmentImport) and data.schema_version in {2, 3}:
         for slot, raw in raw_text.items():
             if raw is None:
-                row = db.get(EquipmentSlot, (1, slot))
+                row = db.get(EquipmentSlot, (1, build_id, slot))
                 if row is None:
-                    db.add(EquipmentSlot(character_id=1, slot=slot, item_id=None))
+                    db.add(EquipmentSlot(character_id=1, build_id=build_id, slot=slot, item_id=None))
                 else:
                     row.item_id = None
     db.commit()
-    return equipment_response(db)
+    return equipment_response(db, build_id)
 
 
-def export_equipment(db: Session) -> EquipmentExport:
+def export_equipment(db: Session, build_id: str = DEFAULT_BUILD_ID) -> EquipmentExport:
     profile = get_or_create_profile(db)
-    current = equipment_response(db)
+    current = equipment_response(db, build_id)
     raw = {slot: value.item.raw_text if value else None for slot, value in current.slots.items()}
     return EquipmentExport(
         profile=profile_schema(profile),

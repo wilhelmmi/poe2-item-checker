@@ -1,27 +1,42 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { exportEquipmentFile, importEquipmentFile } from './api'
+import { deleteBuild, equipEquipment, exportEquipmentFile, importEquipmentFile, isEquipment, loadEquipment } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Equipment-Dateien', () => {
   const slots = Object.fromEntries(
-    ['wand', 'focus', 'helmet', 'body_armour', 'gloves', 'boots', 'belt', 'ring_1', 'ring_2', 'amulet']
+    ['wand', 'focus', 'helmet', 'body_armour', 'gloves', 'boots', 'belt', 'ring_1', 'ring_2', 'amulet', 'charm_1', 'charm_2', 'charm_3']
       .map(slot => [slot, null]),
   )
+  it('löscht Builds über die kodierte Build-ID', async () => {
+    const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({deleted_build_id:'custom-a/b',active_build_id:'builtin'}),{status:200}))
+    vi.stubGlobal('fetch',fetchMock)
+    await expect(deleteBuild('custom-a/b')).resolves.toEqual({deleted_build_id:'custom-a/b',active_build_id:'builtin'})
+    expect(fetchMock).toHaveBeenCalledWith('/api/builds/custom-a%2Fb',expect.objectContaining({method:'DELETE'}))
+  })
+  it.each([
+    ['ungültiges JSON', 'not-json'],
+    ['fehlende ID', JSON.stringify({active_build_id:'builtin'})],
+    ['leere aktive ID', JSON.stringify({deleted_build_id:'custom-a',active_build_id:' '})],
+    ['abweichende gelöschte ID', JSON.stringify({deleted_build_id:'custom-b',active_build_id:'builtin'})],
+  ])('weist %s nach einer erfolgreichen Löschantwort zurück', async (_label,body) => {
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(body,{status:200})))
+    await expect(deleteBuild('custom-a')).rejects.toThrow('keinen gültigen Build-Status')
+  })
   it('weist ungültiges JSON vor einem Request zurück', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     const file = { size: 10, text: async () => '{broken' } as File
-    await expect(importEquipmentFile(file)).rejects.toThrow('kein gültiges JSON')
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('kein gültiges JSON')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('akzeptiert nur Schema v1 oder v2 vor einem Request', async () => {
+  it('akzeptiert nur Schema v1, v2 oder v3 vor einem Request', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const file = { size: 30, text: async () => JSON.stringify({ schema_version: 3 }) } as File
-    await expect(importEquipmentFile(file)).rejects.toThrow('schema_version 1 oder 2')
+    const file = { size: 30, text: async () => JSON.stringify({ schema_version: 4 }) } as File
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('schema_version 1, 2 oder 3')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -38,7 +53,7 @@ describe('Equipment-Dateien', () => {
     vi.stubGlobal('fetch', fetchMock)
     const file = { size: 500, text: async () => JSON.stringify(structured) } as File
 
-    await expect(importEquipmentFile(file)).resolves.toEqual({ ...equipment, ignoredCharms: 1 })
+    await expect(importEquipmentFile('build-a',file)).resolves.toEqual(equipment)
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual(structured)
   })
 
@@ -46,7 +61,7 @@ describe('Equipment-Dateien', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     const file = { size: 30, text: async () => JSON.stringify({ wand: {} }) } as File
-    await expect(importEquipmentFile(file)).rejects.toThrow('strukturierte PoE2-Equipment-Dateien')
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('strukturierte PoE2-Equipment-Dateien')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -58,8 +73,8 @@ describe('Equipment-Dateien', () => {
     vi.stubGlobal('fetch', fetchMock)
     const file = { size: 100, text: async () => JSON.stringify({ schema_version: 1 }) } as File
 
-    await expect(importEquipmentFile(file)).resolves.toEqual(equipment)
-    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/equipment/import', '/api/equipment'])
+    await expect(importEquipmentFile('build-a',file)).resolves.toEqual(equipment)
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/builds/build-a/equipment/import', '/api/builds/build-a/equipment'])
   })
 
   it('weist einen vom POST abweichenden Serverzustand klar zurück', async () => {
@@ -70,7 +85,7 @@ describe('Equipment-Dateien', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(verified), { status: 200 })))
     const file = { size: 100, text: async () => JSON.stringify({ schema_version: 1 }) } as File
 
-    await expect(importEquipmentFile(file)).rejects.toThrow('gespeicherte Serverzustand weicht')
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('gespeicherte Serverzustand weicht')
   })
 
   it('weist eine fehlerhafte erfolgreiche Importantwort ohne TypeError zurück', async () => {
@@ -79,7 +94,7 @@ describe('Equipment-Dateien', () => {
     })))
     const file = { size: 100, text: async () => JSON.stringify({ schema_version: 1 }) } as File
 
-    await expect(importEquipmentFile(file)).rejects.toThrow('keine gültige Equipment-Antwort')
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('keine gültige Equipment-Antwort')
   })
 
   it('weist einen fehlerhaften GET-Zustand mit klarer Verifikationsmeldung zurück', async () => {
@@ -89,7 +104,7 @@ describe('Equipment-Dateien', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ slots: { ...slots, wand: { id: 42, item: {} } } }), { status: 200 })))
     const file = { size: 100, text: async () => JSON.stringify({ schema_version: 1 }) } as File
 
-    await expect(importEquipmentFile(file)).rejects.toThrow('keinen gültigen Equipment-Zustand')
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow('keinen gültigen Equipment-Zustand')
   })
 
   it.each([
@@ -103,21 +118,21 @@ describe('Equipment-Dateien', () => {
     })))
     const file = { size: 100, text: async () => JSON.stringify({ schema_version: 2 }) } as File
 
-    await expect(importEquipmentFile(file)).rejects.toThrow(message)
+    await expect(importEquipmentFile('build-a',file)).rejects.toThrow(message)
   })
 
-  it('verlangt beim Download einen vollständigen v2-Export', async () => {
+  it('verlangt beim Download einen vollständigen v3-Export', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ schema_version: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
-    await expect(exportEquipmentFile()).rejects.toThrow('keinen vollständigen v2-Export')
+    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v3-Export')
   })
 
   it('weist null als Top-Level-Export sicher zurück', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       'null', { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
-    await expect(exportEquipmentFile()).rejects.toThrow('keinen vollständigen v2-Export')
+    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v3-Export')
   })
 
   it.each([
@@ -126,15 +141,31 @@ describe('Equipment-Dateien', () => {
     ['ungültiger Slotwert', { ...slots, wand: 42 }],
   ])('weist einen Export mit %s zurück', async (_label, equipment_raw_text) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      schema_version: 2, profile: {}, equipment_raw_text,
+      schema_version: 3, profile: {}, equipment_raw_text,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    await expect(exportEquipmentFile()).rejects.toThrow('keinen vollständigen v2-Export')
+    await expect(exportEquipmentFile('build-a')).rejects.toThrow('keinen vollständigen v3-Export')
   })
 
-  it('akzeptiert einen vollständigen v2-Export', async () => {
+  it('akzeptiert einen vollständigen v3-Export', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      schema_version: 2, profile: {}, equipment_raw_text: slots,
+      schema_version: 3, profile: {}, equipment_raw_text: slots,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    await expect(exportEquipmentFile()).resolves.toMatchObject({ schema_version: 2, equipment_raw_text: slots })
+    await expect(exportEquipmentFile('build-a')).resolves.toMatchObject({ schema_version: 3, equipment_raw_text: slots })
+  })
+
+  it('validiert Equipment-Zustände strukturell', () => {
+    expect(isEquipment({ slots })).toBe(true)
+    expect(isEquipment({ slots: { ...slots, wand: { id: 42, item: { raw_text: 'wand' } } } })).toBe(false)
+    expect(isEquipment({ slots: { ...slots, charm: null } })).toBe(false)
+  })
+
+  it('weist eine ungültige Load-Antwort klar zurück', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ slots: null }), { status: 200 })))
+    await expect(loadEquipment('build-a')).rejects.toThrow('keinen gültigen Equipment-Zustand')
+  })
+
+  it('weist eine ungültige Equip-Antwort klar zurück', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ slots: { wand: null } }), { status: 200 })))
+    await expect(equipEquipment('build-a','item', 'ring_1')).rejects.toThrow('keinen gültigen Equipment-Zustand')
   })
 })

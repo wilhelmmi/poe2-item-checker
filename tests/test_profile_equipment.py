@@ -9,11 +9,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.api.routes as routes
 from app.api.routes import database
+from app.builds.registry import DEFAULT_BUILD_ID
 from app.db.models import Base, Item
 from app.db.session import enable_sqlite_foreign_keys
 from app.equipment.service import parse_equipment
 from app.evaluation.provider import EvaluationProviderError
 from app.main import app
+from tests.build_seed import seed_builtin_builds
 
 ROOT = Path(__file__).parents[1]
 STAFF = (
@@ -40,6 +42,8 @@ def isolated_db(tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     event.listen(engine, "connect", enable_sqlite_foreign_keys)
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
+    with factory() as db:
+        seed_builtin_builds(db)
 
     async def override() -> Iterator[Session]:
         with factory() as session:
@@ -73,23 +77,23 @@ async def test_equipment_replace_keeps_old_item_and_separates_rings(isolated_db)
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         first = await client.put(
-            "/api/equipment/ring_1", json={"raw_text": seed["equipment_raw_text"]["ring_1"]}
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/ring_1", json={"raw_text": seed["equipment_raw_text"]["ring_1"]}
         )
         assert first.status_code == 200
         old_id = first.json()["id"]
         second = await client.put(
-            "/api/equipment/ring_1", json={"raw_text": seed["equipment_raw_text"]["ring_2"]}
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/ring_1", json={"raw_text": seed["equipment_raw_text"]["ring_2"]}
         )
         assert second.status_code == 200
         assert (
             await client.put(
-                "/api/equipment/wand", json={"raw_text": seed["equipment_raw_text"]["ring_1"]}
+                f"/api/builds/{DEFAULT_BUILD_ID}/equipment/wand", json={"raw_text": seed["equipment_raw_text"]["ring_1"]}
             )
         ).status_code == 422
         await client.put(
-            "/api/equipment/ring_2", json={"raw_text": seed["equipment_raw_text"]["ring_1"]}
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/ring_2", json={"raw_text": seed["equipment_raw_text"]["ring_1"]}
         )
-        equipment = (await client.get("/api/equipment")).json()["slots"]
+        equipment = (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment")).json()["slots"]
         assert set(equipment) == {
             "wand",
             "focus",
@@ -101,10 +105,31 @@ async def test_equipment_replace_keeps_old_item_and_separates_rings(isolated_db)
             "ring_1",
             "ring_2",
             "amulet",
+            "charm_1",
+            "charm_2",
+            "charm_3",
         }
         assert equipment["ring_1"]["id"] != equipment["ring_2"]["id"]
     with isolated_db() as db:
         assert db.get(Item, old_id) is not None
+
+
+@pytest.mark.anyio
+async def test_equipment_is_isolated_between_builds(isolated_db) -> None:
+    seed = json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())
+    other_build = "deadrabb1t-chaos-dot-lich-starter-v1"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        saved = await client.put(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/wand",
+            json={"raw_text": seed["equipment_raw_text"]["wand"]},
+        )
+        assert saved.status_code == 200
+        primary = await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment")
+        secondary = await client.get(f"/api/builds/{other_build}/equipment")
+    assert primary.json()["slots"]["wand"] is not None
+    assert secondary.json()["slots"]["wand"] is None
 
 
 @pytest.mark.anyio
@@ -113,20 +138,49 @@ async def test_staff_loadout_is_atomic_and_focus_removes_staff(isolated_db) -> N
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        await client.put("/api/equipment/wand", json={"raw_text": seed["equipment_raw_text"]["wand"]})
-        await client.put("/api/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]})
-        equipped = await client.post("/api/equipment/equip", json={"raw_text": STAFF})
+        await client.put(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/wand", json={"raw_text": seed["equipment_raw_text"]["wand"]})
+        await client.put(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]})
+        equipped = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip", json={"raw_text": STAFF})
         assert equipped.status_code == 200, equipped.text
         assert equipped.json()["slots"]["wand"]["item"]["item_class"] == "Staves"
         assert equipped.json()["slots"]["focus"] is None
 
         focus = await client.put(
-            "/api/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]}
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]}
         )
         assert focus.status_code == 200
-        slots = (await client.get("/api/equipment")).json()["slots"]
+        slots = (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment")).json()["slots"]
         assert slots["wand"] is None
         assert slots["focus"]["item"]["item_class"] == "Foci"
+
+
+@pytest.mark.anyio
+async def test_direct_charm_equip_respects_belt_capacity(isolated_db) -> None:
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Charms"
+    )
+    belt = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Belts"
+    ) + "\nHas 2 Charm Slots"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        locked = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip",
+            json={"raw_text": raw, "target_slot": "charm_2"},
+        )
+        assert locked.status_code == 422
+        assert locked.json()["detail"]["code"] == "charm_slot_locked"
+        assert (await client.put(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/belt", json={"raw_text": belt}
+        )).status_code == 200
+        equipped = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip",
+            json={"raw_text": raw, "target_slot": "charm_2"},
+        )
+        assert equipped.status_code == 200, equipped.text
+        assert equipped.json()["charm_capacity"] == 2
+        assert equipped.json()["slots"]["charm_2"] is not None
 
 
 @pytest.mark.anyio
@@ -134,11 +188,11 @@ async def test_staff_export_and_import_use_wand_with_empty_focus(isolated_db) ->
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        await client.post("/api/equipment/equip", json={"raw_text": STAFF})
-        exported = (await client.get("/api/equipment/export")).json()
+        await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip", json={"raw_text": STAFF})
+        exported = (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export")).json()
         assert exported["equipment_raw_text"]["wand"] == STAFF
         assert exported["equipment_raw_text"]["focus"] is None
-        assert (await client.post("/api/equipment/import", json=exported)).status_code == 200
+        assert (await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=exported)).status_code == 200
         conflicting = {
             **exported,
             "equipment_raw_text": {
@@ -146,7 +200,7 @@ async def test_staff_export_and_import_use_wand_with_empty_focus(isolated_db) ->
                 "focus": json.loads((ROOT / "docs/poe2-current-equipment.seed.json").read_text())["equipment_raw_text"]["focus"],
             },
         }
-        response = await client.post("/api/equipment/import", json=conflicting)
+        response = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=conflicting)
         assert response.status_code == 422
         assert response.json()["detail"]["code"] == "two_handed_slot_conflict"
 
@@ -168,17 +222,17 @@ async def test_partial_v1_imports_preserve_two_handed_invariant_both_directions(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         await client.put(
-            "/api/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]}
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/focus", json={"raw_text": seed["equipment_raw_text"]["focus"]}
         )
         staff_import = await client.post(
-            "/api/equipment/import", json=partial("wand", STAFF)
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=partial("wand", STAFF)
         )
         assert staff_import.status_code == 200, staff_import.text
         assert staff_import.json()["slots"]["wand"]["item"]["item_class"] == "Staves"
         assert staff_import.json()["slots"]["focus"] is None
 
         focus_import = await client.post(
-            "/api/equipment/import",
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import",
             json=partial("focus", seed["equipment_raw_text"]["focus"]),
         )
         assert focus_import.status_code == 200, focus_import.text
@@ -192,21 +246,22 @@ async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> N
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        imported = await client.post("/api/equipment/import", json=seed)
+        imported = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=seed)
         assert imported.status_code == 200
         assert sum(value is not None for value in imported.json()["slots"].values()) == 10
-        exported = (await client.get("/api/equipment/export")).json()
-        assert exported["schema_version"] == 2
-        assert exported["equipment_raw_text"] == seed["equipment_raw_text"]
+        exported = (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export")).json()
+        assert exported["schema_version"] == 3
+        assert {key: exported["equipment_raw_text"][key] for key in seed["equipment_raw_text"]} == seed["equipment_raw_text"]
+        assert all(exported["equipment_raw_text"][f"charm_{index}"] is None for index in range(1, 4))
         exported["profile"].update(
             {"character_level": 77, "spirit_required": 120, "notes": "roundtrip"}
         )
         exported["equipment_raw_text"]["focus"] = None
-        assert (await client.post("/api/equipment/import", json=exported)).status_code == 200
-        assert (await client.get("/api/equipment")).json()["slots"]["focus"] is None
+        assert (await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=exported)).status_code == 200
+        assert (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment")).json()["slots"]["focus"] is None
         assert (await client.get("/api/profile")).json()["notes"] == "roundtrip"
         partial_v2 = {**exported, "equipment_raw_text": {"wand": None}}
-        rejected = await client.post("/api/equipment/import", json=partial_v2)
+        rejected = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=partial_v2)
         assert rejected.status_code == 422
         assert rejected.json() == {
             "detail": {
@@ -218,12 +273,12 @@ async def test_seed_import_export_roundtrip_and_atomic_failure(isolated_db) -> N
             }
         }
         assert seed["equipment_raw_text"]["wand"] not in rejected.text
-        assert (await client.get("/api/equipment/export")).json()["equipment_raw_text"] == exported[
+        assert (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export")).json()["equipment_raw_text"] == exported[
             "equipment_raw_text"
         ]
         broken = {**seed, "equipment_raw_text": {**seed["equipment_raw_text"], "wand": "bad"}}
-        assert (await client.post("/api/equipment/import", json=broken)).status_code == 422
-        assert (await client.get("/api/equipment/export")).json()["equipment_raw_text"][
+        assert (await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=broken)).status_code == 422
+        assert (await client.get(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export")).json()["equipment_raw_text"][
             "focus"
         ] is None
 
@@ -240,10 +295,24 @@ async def test_structured_docs_import_populates_equipment_used_by_evaluate(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        imported = await client.post("/api/equipment/import", json=snapshot)
+        imported = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=snapshot)
         assert imported.status_code == 200, imported.text
         slots = imported.json()["slots"]
-        assert all(slots[slot] is not None for slot in slots)
+        assert all(slots[slot] is not None for slot in slots if slot != "charm_3")
+        assert slots["charm_3"] is None
+        assert slots["charm_1"]["item"]["name"] == "Sanguis Heroum"
+        assert slots["charm_1"]["item"]["item_class"] == "Charms"
+        assert slots["charm_1"]["item"]["modifiers"] == []
+        exported = (await client.get(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/export"
+        )).json()
+        assert exported["schema_version"] == 3
+        reimported = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=exported
+        )
+        assert reimported.status_code == 200, reimported.text
+        assert reimported.json()["slots"]["charm_1"]["item"]["name"] == "Sanguis Heroum"
+        assert reimported.json()["slots"]["charm_1"]["item"]["modifiers"] == []
         assert slots["ring_1"]["item"]["name"] == "Skull Knot"
         assert slots["ring_2"]["item"]["name"] == "Pandemonium Nail"
         for source_slot, stored_slot in {
@@ -271,7 +340,7 @@ async def test_structured_docs_import_populates_equipment_used_by_evaluate(
             json={
                 "raw_text": candidate,
                 "target_slot": "wand",
-                "build_id": "deadrabb1t-chaos-dot-lich-starter-v1",
+                    "build_id": DEFAULT_BUILD_ID,
             },
         )
         assert evaluated.status_code == 200, evaluated.text
@@ -285,7 +354,7 @@ async def test_structured_import_rejects_unknown_item_fields(isolated_db) -> Non
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.post("/api/equipment/import", json=snapshot)
+        response = await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=snapshot)
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "invalid_equipment_snapshot"
 
@@ -300,7 +369,7 @@ async def test_evaluate_flow_has_no_local_hard_checks(isolated_db, monkeypatch) 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        await client.post("/api/equipment/import", json=seed)
+        await client.post(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/import", json=seed)
         profile = (await client.get("/api/profile")).json()
         profile.update(
             {
@@ -342,11 +411,11 @@ async def test_equipment_save_autoformats_only_safe_collapsed_input(isolated_db)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        saved = await client.put("/api/equipment/wand", json={"raw_text": safe})
+        saved = await client.put(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/wand", json={"raw_text": safe})
         assert saved.status_code == 200
         assert "\n" in saved.json()["item"]["raw_text"]
         rare = safe.replace("Rarity: Magic", "Rarity: Rare").replace("Apt Attuned", "Doom")
-        rejected = await client.put("/api/equipment/wand", json={"raw_text": rare})
+        rejected = await client.put(f"/api/builds/{DEFAULT_BUILD_ID}/equipment/wand", json={"raw_text": rare})
         assert rejected.status_code == 422
         assert rejected.json()["detail"]["code"] == "ambiguous_item_format"
 

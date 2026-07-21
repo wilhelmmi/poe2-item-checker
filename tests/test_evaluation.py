@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.api.routes as routes
+from app.builds.registry import DEFAULT_BUILD_ID
 from app.db.models import Base
 from app.db.session import enable_sqlite_foreign_keys
 from app.equipment.service import replace_equipment
@@ -17,6 +18,7 @@ from app.evaluation.openai_provider import OpenAIEvaluationProvider
 from app.evaluation.provider import EvaluationProviderError
 from app.evaluation.schemas import EvaluationInput, EvaluationResult
 from app.main import app
+from tests.build_seed import seed_builtin_builds
 
 ROOT = Path(__file__).parents[1]
 
@@ -162,6 +164,16 @@ class FakeProvider:
         return result()
 
 
+class AlternativeProvider(FakeProvider):
+    def __init__(self, target: str) -> None:
+        super().__init__()
+        self.target = target
+
+    async def evaluate(self, evaluation_input: EvaluationInput) -> EvaluationResult:
+        self.received = evaluation_input
+        return result().model_copy(update={"recommended_target_slot": self.target})
+
+
 class FailingProvider(FakeProvider):
     async def evaluate(self, evaluation_input: EvaluationInput) -> EvaluationResult:
         raise EvaluationProviderError("provider_refusal", "Sichere Ablehnung.")
@@ -180,6 +192,8 @@ def isolated_db(tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     event.listen(engine, "connect", enable_sqlite_foreign_keys)
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
+    with factory() as db:
+        seed_builtin_builds(db)
 
     async def override() -> AsyncIterator[Session]:
         with factory() as session:
@@ -252,6 +266,130 @@ async def test_collapsed_quoted_staff_compares_both_hand_slots(
     assert set(provider.received.equipped_slots) == {"wand", "focus"}
     assert provider.received.equipped_slots["wand"] is not None
     assert provider.received.equipped_slots["focus"] is not None
+
+
+@pytest.mark.anyio
+async def test_ring_candidate_compares_both_rings_and_selects_provider_target(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = AlternativeProvider("ring_2")
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Rings"
+    )
+    with isolated_db() as db:
+        replace_equipment(db, "ring_1", raw)
+        replace_equipment(db, "ring_2", raw)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/items/evaluate", json={"raw_text": raw, "target_slot": "ring_1"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["comparison_slots"] == ["ring_1", "ring_2"]
+    assert body["target_slots"] == ["ring_2"]
+    assert body["target_slot"] == "ring_2"
+    assert set(provider.received.equipped_slots) == {"ring_1", "ring_2"}
+
+
+@pytest.mark.anyio
+async def test_charm_candidate_respects_conservative_one_slot_capacity(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = AlternativeProvider("charm_1")
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Charms"
+    )
+    unknown_belt = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Belts"
+    )
+    with isolated_db() as db:
+        replace_equipment(db, "belt", unknown_belt)
+        replace_equipment(db, "charm_1", raw)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/items/evaluate", json={"raw_text": raw, "target_slot": "charm_1"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["comparison_slots"] == ["charm_1"]
+    assert body["available_target_slots"] == ["charm_1"]
+    assert body["target_slots"] == ["charm_1"]
+    assert body["target_slot"] == "charm_1"
+    assert body["evaluation"]["verdict"] == "upgrade"
+    assert body["evaluation"]["recommendation"] == "better"
+    assert body["evaluation"]["recommended_target_slot"] == "charm_1"
+    assert provider.received is not None
+    assert provider.received.equipped is not None
+
+
+@pytest.mark.anyio
+async def test_locked_charm_target_is_rejected_before_evaluation(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = AlternativeProvider("charm_2")
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Charms"
+    )
+    with isolated_db() as db:
+        replace_equipment(db, "charm_1", raw)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": raw, "target_slot": "charm_2"}
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "charm_slot_locked"
+    assert provider.received is None
+
+
+@pytest.mark.anyio
+async def test_two_slot_belt_makes_second_charm_an_empty_target(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = AlternativeProvider("charm_2")
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Charms"
+    )
+    belt = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Belts"
+    ) + "\nHas 2 Charm Slots"
+    with isolated_db() as db:
+        replace_equipment(db, "belt", belt)
+        replace_equipment(db, "charm_1", raw)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/items/evaluate", json={"raw_text": raw, "target_slot": "charm_1"})
+    assert response.status_code == 200, response.text
+    assert response.json()["comparison_slots"] == ["charm_1", "charm_2"]
+    assert response.json()["available_target_slots"] == ["charm_1", "charm_2"]
+    assert response.json()["target_slot"] == "charm_2"
+    assert response.json()["provider"] == "system"
+    assert provider.received is None
+
+
+@pytest.mark.anyio
+async def test_first_ring_can_be_evaluated_and_equipped_into_empty_loadout(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = AlternativeProvider("ring_1")
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    raw = (ROOT / "tests/fixtures/rare_wand.txt").read_text().replace(
+        "Item Class: Wands", "Item Class: Rings"
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        evaluated = await client.post("/api/items/evaluate", json={"raw_text": raw, "target_slot": "ring_1"})
+        assert evaluated.status_code == 200, evaluated.text
+        assert evaluated.json()["equipped"] is None
+        assert evaluated.json()["evaluation"]["verdict"] == "upgrade"
+        assert evaluated.json()["evaluation"]["losses"] == []
+        assert provider.received is None
+        equipped = await client.post(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/equip",
+            json={"raw_text": raw, "target_slot": evaluated.json()["target_slot"]},
+        )
+    assert equipped.status_code == 200, equipped.text
+    assert equipped.json()["slots"]["ring_1"] is not None
+    assert equipped.json()["slots"]["ring_2"] is None
 
 
 @pytest.mark.anyio
