@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteBuild, equipEquipment, exportEquipmentFile, importEquipmentFile, isEquipment, loadEquipment } from './api'
+import { deleteBuild, equipEquipment, exportEquipmentFile, importEquipmentFile, isEquipment, loadEquipment, recognizeItemImage } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -167,5 +167,23 @@ describe('Equipment-Dateien', () => {
   it('weist eine ungültige Equip-Antwort klar zurück', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ slots: { wand: null } }), { status: 200 })))
     await expect(equipEquipment('build-a','item', 'ring_1')).rejects.toThrow('keinen gültigen Equipment-Zustand')
+  })
+})
+
+describe('Screenshot-OCR', () => {
+  it('sendet das Bild als Multipart ohne Content-Type manuell zu setzen', async () => {
+    const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({text:'Item Class: Wands'}),{status:200}))
+    vi.stubGlobal('fetch',fetchMock)
+    const file=new File(['png'], 'item.png', {type:'image/png'})
+    await expect(recognizeItemImage(file)).resolves.toEqual({text:'Item Class: Wands'})
+    expect(fetchMock).toHaveBeenCalledWith('/api/items/ocr',expect.objectContaining({method:'POST',body:expect.any(FormData)}))
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toBeUndefined()
+  })
+
+  it('weist falsche Bildtypen lokal zurück', async () => {
+    const fetchMock=vi.fn()
+    vi.stubGlobal('fetch',fetchMock)
+    await expect(recognizeItemImage(new File(['x'],'item.gif',{type:'image/gif'}))).rejects.toThrow('PNG-, JPEG- und WebP')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

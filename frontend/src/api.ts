@@ -58,7 +58,9 @@ export type EvaluateResponse = {
   target_slots: string[]; comparison_slots: string[]; available_target_slots?: string[]; equipped_slots: Record<string, ParsedItem | null>
   provider: string | null; model: string | null; provider_status: 'success' | 'unavailable'
   provider_error: { code: string; message: string } | null; disclaimer: string
+  modifier_resolutions: { modifier_index:number; normalized_key:string; confidence:'low'|'medium'|'high' }[]
 }
+export type OcrResponse = { text:string }
 export type Profile = { name: string; build_stage: string; character_level: number | null; life: number | null; energy_shield: number | null; mana: number | null; spirit: number | null; spirit_required: number | null; spirit_reserved: number | null; strength: number | null; dexterity: number | null; intelligence: number | null; fire_resistance: number | null; cold_resistance: number | null; lightning_resistance: number | null; chaos_resistance: number | null; resistance_cap: number; notes: string }
 export type Equipment = { slots: Record<string, { id: string; item: ParsedItem } | null>; charm_capacity?: number; available_charm_slots?: string[] }
 export type EquipmentImportResult = Equipment
@@ -77,6 +79,25 @@ export async function parseItem(rawText: string, signal: AbortSignal): Promise<P
     throw new Error(`Analyse fehlgeschlagen (${response.status}).`)
   }
   return response.json() as Promise<ParseResponse>
+}
+
+export async function recognizeItemImage(file: File, signal?: AbortSignal): Promise<OcrResponse> {
+  if (!['image/png','image/jpeg','image/webp'].includes(file.type)) {
+    throw new Error('Unterstützt werden PNG-, JPEG- und WebP-Bilder.')
+  }
+  if (file.size > 8_000_000) throw new Error('Das Bild ist größer als 8 MB.')
+  const form = new FormData()
+  form.append('image', file, file.name || 'clipboard.png')
+  const response = await fetch('/api/items/ocr', { method:'POST', body:form, signal })
+  if (!response.ok) {
+    const body = await response.json().catch(()=>null) as {detail?:{message?:string}}|null
+    throw new Error(body?.detail?.message ?? `Texterkennung fehlgeschlagen (${response.status}).`)
+  }
+  const data:unknown = await response.json()
+  if (typeof data !== 'object' || data === null || typeof (data as {text?:unknown}).text !== 'string') {
+    throw new Error('Die Texterkennung lieferte keinen gültigen Text.')
+  }
+  return data as OcrResponse
 }
 
 export async function evaluateItem(rawText: string, signal: AbortSignal, targetSlot: string, buildId: string): Promise<EvaluateResponse> {

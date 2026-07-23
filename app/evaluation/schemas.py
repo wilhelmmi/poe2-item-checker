@@ -144,6 +144,12 @@ class ProviderFailure(StrictModel):
     message: str
 
 
+class ModifierResolution(StrictModel):
+    modifier_index: int = Field(ge=0)
+    normalized_key: str
+    confidence: Literal["low", "medium", "high"]
+
+
 class EvaluateItemRequest(ParseItemRequest):
     target_slot: Slot
     build_id: str = DEFAULT_BUILD_ID
@@ -164,4 +170,5 @@ class EvaluateItemResponse(StrictModel):
     model: str | None
     provider_status: Literal["success", "unavailable"]
     provider_error: ProviderFailure | None
+    modifier_resolutions: list[ModifierResolution] = Field(default_factory=list)
     disclaimer: str

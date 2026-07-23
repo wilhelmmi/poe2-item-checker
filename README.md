@@ -8,6 +8,22 @@ bleiben Itemtext-Parsing, technische Slotvalidierung sowie Profil-/Equipment-Per
 gibt keinen lokalen Score und keinen lokalen Empfehlungs-Fallback. Wenn der Provider oder
 API-Key fehlt, zeigt die App deshalb **keine Empfehlung**.
 
+## Screenshot-Import und Datenschutz
+
+Ein Item-Screenshot kann direkt in das Itemtextfeld eingefügt (`Strg+V`) oder als PNG, JPEG
+oder WebP ausgewählt werden. Tesseract verarbeitet das Bild ausschließlich lokal im
+App-Container (`deu+eng`); das Bild wird weder gespeichert noch an OpenAI übertragen. Der
+erkannte Text bleibt editierbar und eine Bewertung startet immer erst nach einem manuellen
+Klick.
+
+Der deterministische Parser bleibt kostenlos und lokal. Nur beim ausdrücklich gestarteten
+Vergleich dürfen unbekannte, wahrscheinlich deutsche Modifier als eng begrenzter Fallback an
+OpenAI gesendet werden. Übertragen werden höchstens acht Modifierzeilen mit je 500 Zeichen
+sowie die feste Liste erlaubter Normalisierungsschlüssel; `store=false` ist gesetzt. Nur
+Zuordnungen mit hoher Confidence und einem bekannten Schlüssel werden für diesen Vergleich
+verwendet. Rohtext und Zahlenwerte werden nie verändert; Fehler führen konservativ zu keiner
+Zuordnung.
+
 ## Builds
 
 Standard ist `deadrabb1t-chaos-dot-lich-starter-v2`: **ED Contagion Chaos DoT Lich

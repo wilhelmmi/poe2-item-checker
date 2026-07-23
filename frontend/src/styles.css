@@ -189,6 +189,8 @@ li { margin: .3rem 0; line-height: 1.45; }
 .warnings { padding: .1rem 1rem 1rem; border: 1px solid #5d4d33; border-radius: 5px; background: #211c15; }
 .result-footer { padding-top: 1rem; border-top: 1px solid var(--border); }
 .disclaimer { margin: 1rem 0 0; color: var(--faint); font-size: .72rem; }
+.screenshot-import { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; margin-top: .75rem; }
+.screenshot-import small { flex-basis: 100%; color: var(--muted); }
 
 footer { max-width: 92rem; margin: 0 auto; padding: 1.2rem clamp(1rem, 3vw, 3rem) 2rem; display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid rgba(210,168,95,.14); color: var(--faint); font-size: .7rem; }
 code, pre { white-space: pre-wrap; overflow-wrap: anywhere; }
