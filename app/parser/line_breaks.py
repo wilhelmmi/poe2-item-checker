@@ -5,9 +5,10 @@ from app.schemas.parsing import LineBreakInsertion, LineBreakSuggestion
 
 SEPARATOR_RE = re.compile(r"(?<!\S)--------(?!\S)")
 EXPORT_HEADER_RE = re.compile(
-    r"\A[ \t]*Item Class:[ \t]+(?P<item_class>(?:(?!Rarity:)[^\r\n])*?\S)"
-    r"[ \t]+(?P<rarity_label>Rarity:)"
-    r"[ \t]+(?P<rarity>Normal|Magic|Rare|Unique)\b"
+    r"\A[ \t]*(?:Item Class|Gegenstandsklasse):[ \t]+"
+    r"(?P<item_class>(?:(?!(?:Rarity|Seltenheit):)[^\r\n])*?\S)"
+    r"[ \t]+(?P<rarity_label>(?:Rarity|Seltenheit):)"
+    r"[ \t]+(?P<rarity>Normal|Magic|Rare|Unique|Magisch|Selten|Einzigartig)\b"
 )
 BRACED_RE = re.compile(r"\{[^{}]*\}")
 
@@ -40,7 +41,7 @@ def suggest_line_breaks(raw_text: str) -> LineBreakSuggestion | None:
         add(match.end(), "after_separator")
     add(export_header.start("rarity_label"), "before_rarity")
     add(export_header.end("rarity"), "after_rarity")
-    if export_header.group("rarity") == "Rare":
+    if export_header.group("rarity") in {"Rare", "Selten"}:
         first_separator = next(SEPARATOR_RE.finditer(raw_text), None)
         identity_end = first_separator.start() if first_separator else len(raw_text)
         identity = raw_text[export_header.end("rarity"):identity_end]

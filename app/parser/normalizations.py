@@ -1,6 +1,6 @@
 import re
 
-NORMALIZATION_REGISTRY_VERSION = 1
+NORMALIZATION_REGISTRY_VERSION = 2
 NORMALIZATION_PATTERNS = (
     (re.compile(r"increased Spell Damage", re.I), "increased_spell_damage"),
     (re.compile(r"Level of all Chaos Spell Skills", re.I), "all_chaos_spell_skill_levels"),
@@ -27,6 +27,31 @@ NORMALIZATION_PATTERNS = (
     (re.compile(r"increased Lightning Damage", re.I), "increased_lightning_damage"),
     (re.compile(r"increased Mana Regeneration Rate", re.I), "mana_regeneration"),
     (re.compile(r"to maximum Mana", re.I), "maximum_mana"),
+    (re.compile(r"erhöhter? Zauberschaden", re.I), "increased_spell_damage"),
+    (re.compile(r"Stufe aller Chaos-Zauberfertigkeiten", re.I), "all_chaos_spell_skill_levels"),
+    (re.compile(r"Stufe aller Zauberfertigkeiten", re.I), "all_spell_skill_levels"),
+    (re.compile(r"erhöhter? Chaosschaden", re.I), "increased_chaos_damage"),
+    (re.compile(r"erhöhte Wirkgeschwindigkeit", re.I), "increased_cast_speed"),
+    (re.compile(r"verringerte Wirkgeschwindigkeit", re.I), "reduced_cast_speed"),
+    (re.compile(r"Schadens? als zusätzlichen Blitzschaden", re.I), "extra_lightning_damage"),
+    (re.compile(r"Mana (?:pro|für jeden) getöteten Gegner", re.I), "mana_per_enemy_killed"),
+    (re.compile(r"erhöhte Bewegungsgeschwindigkeit", re.I), "movement_speed"),
+    (re.compile(r"zu Feuerwiderstand", re.I), "fire_resistance"),
+    (re.compile(r"zu Kältewiderstand", re.I), "cold_resistance"),
+    (re.compile(r"zu Blitzwiderstand", re.I), "lightning_resistance"),
+    (re.compile(r"zu Chaoswiderstand", re.I), "chaos_resistance"),
+    (re.compile(r"zu maximalem Energieschild", re.I), "maximum_energy_shield"),
+    (re.compile(r"zu maximalem Leben", re.I), "maximum_life"),
+    (re.compile(r"Lebensregeneration pro Sekunde", re.I), "life_regeneration"),
+    (re.compile(r"zu Willenskraft", re.I), "spirit"),
+    (re.compile(r"zu allen Attributen", re.I), "all_attributes"),
+    (re.compile(r"zu Stärke", re.I), "strength"),
+    (re.compile(r"zu Geschicklichkeit", re.I), "dexterity"),
+    (re.compile(r"zu Intelligenz", re.I), "intelligence"),
+    (re.compile(r"zu Betäubungsschwelle", re.I), "stun_threshold"),
+    (re.compile(r"erhöhter? Blitzschaden", re.I), "increased_lightning_damage"),
+    (re.compile(r"erhöhte Manaregenerationsrate", re.I), "mana_regeneration"),
+    (re.compile(r"zu maximalem Mana", re.I), "maximum_mana"),
 )
 KNOWN_NORMALIZED_KEYS = frozenset(key for _, key in NORMALIZATION_PATTERNS)
 

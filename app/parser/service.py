@@ -10,7 +10,12 @@ BLOCKING_WARNING_CODES = {
     "missing_item_identity",
     "no_modifiers_detected",
 }
-COLLAPSED_RARITY_RE = re.compile(r"\bRarity:\s*(Normal|Magic|Rare|Unique)\b")
+COLLAPSED_RARITY_RE = re.compile(
+    r"\b(?:Rarity|Seltenheit):\s*(Normal|Magic|Rare|Unique|Magisch|Selten|Einzigartig)\b"
+)
+RARITY_CANONICAL = {
+    "Magisch": "Magic", "Selten": "Rare", "Einzigartig": "Unique",
+}
 
 
 def _unknown_locations(raw_text: str, unknown_lines: list[str]) -> tuple[list[int], list[str]]:
@@ -36,7 +41,10 @@ def parse_with_warnings(raw_text: str) -> ParseItemResponse:
         raw_text = raw_text[1:-1]
     warnings: list[ParseWarning] = []
     collapsed = len(raw_text.splitlines()) == 1 and (
-        "--------" in raw_text or "Item Class:" in raw_text or "Rarity:" in raw_text
+        "--------" in raw_text
+        or any(label in raw_text for label in (
+            "Item Class:", "Rarity:", "Gegenstandsklasse:", "Seltenheit:",
+        ))
     )
     if collapsed:
         original_line = raw_text.splitlines()[0]
@@ -70,7 +78,7 @@ def parse_with_warnings(raw_text: str) -> ParseItemResponse:
                 raw_lines=[],
             )
         )
-    if re.search(r"\{[^}]*Modifier", raw_text, re.IGNORECASE) and not item.modifiers:
+    if re.search(r"\{[^}]*(?:Modifier|Modifikator)", raw_text, re.IGNORECASE) and not item.modifiers:
         warnings.append(
             ParseWarning(
                 code="no_modifiers_detected",
@@ -83,12 +91,17 @@ def parse_with_warnings(raw_text: str) -> ParseItemResponse:
     status = "unchanged"
     if collapsed:
         rarity_match = COLLAPSED_RARITY_RE.search(raw_text)
-        if rarity_match and rarity_match.group(1) == "Unique":
+        rarity = RARITY_CANONICAL.get(rarity_match.group(1), rarity_match.group(1)) if rarity_match else None
+        if rarity == "Unique":
             status = "ambiguous"
-        elif suggestion and rarity_match and rarity_match.group(1) in {"Normal", "Magic", "Rare"}:
+        elif rarity == "Rare" and "Seltenheit:" in raw_text:
+            # German rare names and base types have no safe token boundary. Keep
+            # the insert-only proposal available for review, but never auto-apply it.
+            status = "ambiguous"
+        elif suggestion and rarity in {"Normal", "Magic", "Rare"}:
             reparsed = parse_with_warnings(suggestion.suggested_text)
             has_identity = all((reparsed.item.item_class, reparsed.item.rarity, reparsed.item.name))
-            if rarity_match.group(1) == "Rare":
+            if rarity == "Rare":
                 has_identity = has_identity and bool(reparsed.item.base_type)
             has_blocker = any(w.code in BLOCKING_WARNING_CODES for w in reparsed.warnings)
             status = (

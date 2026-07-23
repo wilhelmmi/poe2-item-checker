@@ -420,6 +420,30 @@ async def test_equipment_save_autoformats_only_safe_collapsed_input(isolated_db)
         assert rejected.json()["detail"]["code"] == "ambiguous_item_format"
 
 
+@pytest.mark.anyio
+async def test_german_item_class_remains_compatible_with_equipment_slots(isolated_db) -> None:
+    raw = (
+        "Gegenstandsklasse: Stiefel\nSeltenheit: Magisch\nSchnelle Seidenstiefel\n--------\n"
+        "Anforderungen:\nStufe: 60\nInt: 78\n--------\nGegenstandsstufe: 66\n--------\n"
+        "{ Präfix-Modifikator — Tempo }\n30% erhöhte Bewegungsgeschwindigkeit"
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        saved = await client.put(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/boots", json={"raw_text": raw}
+        )
+        assert saved.status_code == 200
+        item = saved.json()["item"]
+        assert item["item_class"] == "Boots"
+        assert item["modifiers"][0]["normalized_key"] == "movement_speed"
+        mismatch = await client.put(
+            f"/api/builds/{DEFAULT_BUILD_ID}/equipment/wand", json={"raw_text": raw}
+        )
+        assert mismatch.status_code == 422
+        assert mismatch.json()["detail"]["code"] == "item_slot_mismatch"
+
+
 def test_bulk_import_parser_never_silently_autoformats_collapsed_input() -> None:
     collapsed = (
         "Item Class: Wands Rarity: Magic Apt Attuned Wand -------- Item Level: 66 "

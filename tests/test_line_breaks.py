@@ -90,3 +90,16 @@ def test_collapsed_rare_name_and_focus_base_are_separated_insert_only() -> None:
     assert _remove_insertions(suggestion.suggested_text, offsets) == raw
     item = parse_item_text(suggestion.suggested_text)
     assert (item.name, item.base_type) == ("Empyrean Emblem", "Runed Focus")
+
+
+def test_collapsed_german_export_is_recognized_and_parseable() -> None:
+    raw = (
+        "Gegenstandsklasse: Stiefel Seltenheit: Magisch Schnelle Seidenstiefel -------- "
+        "Gegenstandsstufe: 66 -------- { Präfix-Modifikator (Rang: 3) — Tempo } "
+        "30% erhöhte Bewegungsgeschwindigkeit"
+    )
+    suggestion = suggest_line_breaks(raw)
+    assert suggestion is not None
+    item = parse_item_text(suggestion.suggested_text)
+    assert (item.item_class, item.rarity, item.item_level) == ("Boots", "Magic", 66)
+    assert item.modifiers[0].normalized_key == "movement_speed"

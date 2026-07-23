@@ -125,7 +125,7 @@ describe('API-only comparison', () => {
   it('shows the versioned build and sends build and target slot', async () => {
     const fetchMock=vi.fn((input:RequestInfo|URL, _init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(parsedResponse):response(evaluation))
     vi.stubGlobal('fetch',fetchMock); render(<App/>); await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}})
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}})
     fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/Candidate ist besser/)).toBeTruthy()
     expect(screen.getByText('Doom')).toBeTruthy(); expect(screen.getByText('Hope')).toBeTruthy()
@@ -138,7 +138,7 @@ describe('API-only comparison', () => {
   it('shows no fallback recommendation when provider is unavailable', async () => {
     const unavailable={...evaluation,evaluation:null,provider:null,model:null,provider_status:'unavailable',provider_error:{code:'provider_not_configured',message:'Nicht konfiguriert.'}}
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(parsedResponse):response(unavailable)))
-    render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
+    render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/Keine Empfehlung/)).toBeTruthy(); expect(screen.queryByText('Candidate ist besser')).toBeNull()
   })
   it('automatically compares boots with the boots slot while the editor stays on wand', async () => {
@@ -147,7 +147,7 @@ describe('API-only comparison', () => {
     const bootsEvaluation={...evaluation,parse:{...evaluation.parse,item:boots},target_slot:'boots',target_slots:['boots'],equipped:boots,equipped_slots:{boots}}
     const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(parse):response(bootsEvaluation))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'boots'}})
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'boots'}})
     fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/Zielslot: boots/)).toBeTruthy()
     const body=JSON.parse(fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')![1]!.body as string)
@@ -158,7 +158,7 @@ describe('API-only comparison', () => {
     const parse={item:{...parsedItem,item_class:'Quivers'},warnings:[],line_break_suggestion:null,auto_format_status:'unchanged'}
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response(parse))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'staff'}})
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'staff'}})
     fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/Quivers wird nicht als Equipment-Slot unterstützt/)).toBeTruthy()
     expect(fetchMock.mock.calls.some(call=>call[0]==='/api/items/evaluate')).toBe(false)
@@ -166,7 +166,7 @@ describe('API-only comparison', () => {
   it('does not expose a manual ring comparison context', async () => {
     const ring={...parsedItem,item_class:'Rings'};const ringParse={...parsedResponse,item:ring};const ringEvaluation={...evaluation,parse:{...evaluation.parse,item:ring},target_slot:'ring_1',target_slots:['ring_1']}
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(ringParse):response(ringEvaluation)))
-    render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'})); await screen.findByText(/Candidate ist besser/); expect(screen.queryByLabelText(/als Zielslot wählen/)).toBeNull()
+    render(<App/>); await screen.findByText(/Quelle und Variante/); fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}}); fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'})); await screen.findByText(/Candidate ist besser/); expect(screen.queryByLabelText(/als Zielslot wählen/)).toBeNull()
   })
   it('autoformats safe input without offering an undo action', async () => {
     const original='Item Class: Wands Rarity: Magic Apt Wand'
@@ -174,7 +174,7 @@ describe('API-only comparison', () => {
     const safe={item:{...parsedItem,raw_text:original},warnings:[],line_break_suggestion:{suggested_text:formatted,insertions:[]},auto_format_status:'safe'}
     const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(safe):response({...evaluation,parse:{...evaluation.parse,item:{...parsedItem,raw_text:formatted}}}))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    const textarea=screen.getByLabelText('Englischen Itemtext einfügen') as HTMLTextAreaElement
+    const textarea=screen.getByLabelText('Deutschen oder englischen Itemtext einfügen') as HTMLTextAreaElement
     fireEvent.change(textarea,{target:{value:original}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/Sichere Zeilenumbrüche/)).toBeTruthy();expect(textarea.value).toBe(formatted)
     const evaluateCall=fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')
@@ -189,7 +189,7 @@ describe('API-only comparison', () => {
     const staffEvaluation={...evaluation,parse:{...evaluation.parse,item:staff},target_slot:'wand',target_slots:['wand','focus'],equipped_slots:{wand:parsedItem,focus:null}}
     const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(safe):response(staffEvaluation))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:original}})
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:original}})
     fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/Zielslots: wand \+ focus/)).toBeTruthy()
     const body=JSON.parse(fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')![1]!.body as string)
@@ -199,7 +199,7 @@ describe('API-only comparison', () => {
     const ambiguous={item:parsedItem,warnings:[],line_break_suggestion:{suggested_text:'manual\nproposal',insertions:[]},auto_format_status:'ambiguous'}
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):response(ambiguous))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'rare collapsed'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'rare collapsed'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}))
     expect(await screen.findByText(/mehrdeutig/)).toBeTruthy();expect(screen.getByLabelText('Manueller Formatierungsvorschlag')).toBeTruthy()
     expect(fetchMock.mock.calls.some(call=>call[0]==='/api/items/evaluate')).toBe(false)
   })
@@ -239,7 +239,7 @@ describe('API-only comparison', () => {
     const equipped={slots:{...emptySlots(),wand:{id:'new-item',item:{...parsedItem,raw_text:'item'}}}}
     const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/items/parse'?response(parse):input==='/api/items/evaluate'?response(evaluation):response(equipped))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}})
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}})
     fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
     fireEvent.click(screen.getByRole('button',{name:'Candidate ausrüsten'}))
     expect(await screen.findByText(/Candidate wurde in wand ausgerüstet/)).toBeTruthy()
@@ -253,7 +253,7 @@ describe('API-only comparison', () => {
     const pendingSave=new Promise<Response>(resolve=>{finishSave=resolve})
     const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):input==='/api/builds/active'?response({build_id:build.build_id}):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(parse):input==='/api/items/evaluate'?response(evaluation):pendingSave)
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}})
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}})
     fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
     const equip=screen.getByRole('button',{name:'Candidate ausrüsten'})
     fireEvent.click(equip);fireEvent.click(equip)
@@ -309,7 +309,7 @@ describe('API-only comparison', () => {
     const oldSlots:Record<string,{id:string;item:typeof parsedItem}|null>=emptySlots();oldSlots.wand={id:'old',item:oldItem}
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?initial:input==='/api/items/parse'?response(parsedResponse):input==='/api/items/evaluate'?response(evaluation):String(input).endsWith('/equipment/equip')?response({slots:newSlots}):response({build_id:build.build_id}))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByText(/Quelle und Variante/)
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
     fireEvent.click(screen.getByRole('button',{name:'Candidate ausrüsten'}));expect(await screen.findByText('New Wand')).toBeTruthy()
     resolveInitial(new Response(JSON.stringify({slots:oldSlots}),{status:200,headers:{'Content-Type':'application/json'}}))
     await waitFor(()=>expect(screen.queryByText('Old Wand')).toBeNull())
@@ -332,7 +332,7 @@ describe('API-only comparison', () => {
     const ring={...parsedItem,item_class:'Rings'};const ringParse={...parsedResponse,item:ring};const ringEvaluation={...evaluation,parse:{...evaluation.parse,item:ring},target_slot:'ring_2',target_slots:['ring_2'],comparison_slots:['ring_1','ring_2'],equipped_slots:{ring_1:ring,ring_2:ring},evaluation:{...evaluation.evaluation,recommended_target_slot:'ring_2'}}
     const fetchMock=vi.fn((input:RequestInfo|URL,_init?:RequestInit)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?response(emptyEquipment()):input==='/api/items/parse'?response(ringParse):input==='/api/items/evaluate'?response(ringEvaluation):response({build_id:build.build_id}))
     vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByLabelText('Aktuell ausgerüstete Items')
-    fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));expect(await screen.findByText(/Zielslot: ring_2/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));expect(await screen.findByText(/Zielslot: ring_2/)).toBeTruthy()
     const body=JSON.parse(fetchMock.mock.calls.find(call=>call[0]==='/api/items/evaluate')![1]!.body as string);expect(body.target_slot).toBe('ring_1')
   })
 
@@ -347,14 +347,14 @@ describe('API-only comparison', () => {
   it('shows retry when resync after a failed equip also fails', async () => {
     let equipmentGets=0
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?(++equipmentGets===1?response(emptyEquipment()):response({},false)):input==='/api/items/parse'?response(parsedResponse):input==='/api/items/evaluate'?response(evaluation):String(input).endsWith('/equipment/equip')?response({},false):response({build_id:build.build_id}))
-    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByLabelText('Aktuell ausgerüstete Items');fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByLabelText('Aktuell ausgerüstete Items');fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
     fireEvent.click(screen.getByRole('button',{name:'Candidate ausrüsten'}));expect(await screen.findByRole('button',{name:'Erneut laden'})).toBeTruthy();expect(equipmentGets).toBe(2)
   })
 
   it('disables equipment retry while a mutation is running', async () => {
     let resolveEquip:(value:Response)=>void=()=>undefined;const pendingEquip=new Promise<Response>(resolve=>{resolveEquip=resolve});let equipmentGets=0
     const fetchMock=vi.fn((input:RequestInfo|URL)=>input==='/api/builds'?response([build]):String(input).endsWith('/equipment')?(equipmentGets++,response({},false)):input==='/api/items/parse'?response(parsedResponse):input==='/api/items/evaluate'?response(evaluation):String(input).endsWith('/equipment/equip')?pendingEquip:response({build_id:build.build_id}))
-    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByRole('button',{name:'Erneut laden'});fireEvent.change(screen.getByLabelText('Englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
+    vi.stubGlobal('fetch',fetchMock);render(<App/>);await screen.findByRole('button',{name:'Erneut laden'});fireEvent.change(screen.getByLabelText('Deutschen oder englischen Itemtext einfügen'),{target:{value:'item'}});fireEvent.click(screen.getByRole('button',{name:'Mit ausgerüstetem Item vergleichen'}));await screen.findByText(/Candidate ist besser/)
     fireEvent.click(screen.getByRole('button',{name:'Candidate ausrüsten'}));const retry=screen.getByRole('button',{name:'Erneut laden'}) as HTMLButtonElement;expect(retry.disabled).toBe(true);fireEvent.click(retry);expect(equipmentGets).toBe(1)
     resolveEquip(new Response(JSON.stringify(emptyEquipment()),{status:200,headers:{'Content-Type':'application/json'}}));await screen.findByText(/Candidate wurde in wand ausgerüstet/)
   })

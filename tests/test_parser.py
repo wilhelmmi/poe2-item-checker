@@ -112,3 +112,23 @@ Energy Shield: 30 (augmented)"""
     assert item.armour_augmented is True
     assert item.evasion_augmented is False
     assert item.energy_shield_augmented is True
+
+
+def test_german_export_is_canonicalized_without_changing_raw_text() -> None:
+    raw = fixture("rare_wand_de.txt")
+    item = parse_item_text(raw)
+    assert item.raw_text == raw
+    assert (item.item_class, item.rarity) == ("Wands", "Rare")
+    assert (item.name, item.base_type) == ("Unheil-Nadel", "Verdorrter Zauberstab")
+    assert (item.required_level, item.required_intelligence, item.item_level) == (26, 42, 67)
+    assert item.energy_shield_augmented is True
+    assert item.sockets == ["S", "S"]
+    assert item.granted_skill == "Stufe 10 Chaosblitz"
+    explicit = [modifier for modifier in item.modifiers if modifier.source == "explicit"]
+    assert [modifier.normalized_key for modifier in explicit] == [
+        "increased_spell_damage", "extra_lightning_damage", "all_chaos_spell_skill_levels",
+    ]
+    assert explicit[1].values == [20.5]
+    assert explicit[1].roll_ranges == [[19.5, 21.5]]
+    assert explicit[0].raw_text == "30(25-34)% erhöhter Zauberschaden"
+    assert next(modifier for modifier in item.modifiers if modifier.crafted).affix_type == "suffix"
