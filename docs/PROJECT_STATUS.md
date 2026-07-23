@@ -5,6 +5,10 @@ Stand: 2026-07-21 — Equipment-, Bewertungs- und Custom-Build-Flows umgesetzt u
 ## Aktives Produkt
 
 - Candidate-vs-Equipped-Empfehlung über `POST /api/items/evaluate`.
+- Screenshot-Copy/Paste und Datei-Fallback über lokale Tesseract-OCR (`deu+eng`), ohne
+  Bildpersistenz oder automatische Bewertung.
+- Konservativer AI-Fallback für unbekannte deutsche Modifier nur beim manuellen Evaluate;
+  Parser und Parse-Endpunkt bleiben deterministisch und kostenfrei.
 - Ergebnis: kompatible Empfehlung (`better | not_better | uncertain`), konsistentes
   Upgrade-/Sidegrade-/Downgrade-Urteil, Gewinne, Verluste, vier Build-Auswirkungen,
   Confidence, Warnungen und klare Ausrüstungsempfehlung.

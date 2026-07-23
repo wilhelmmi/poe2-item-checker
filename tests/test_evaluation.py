@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -30,6 +31,55 @@ def result() -> EvaluationResult:
         gains=["Mehr relevante Werte."], losses=[],
         impacts={"damage": "better", "defensive": "similar", "resistances": "similar", "utility": "similar"},
         clear_recommendation="Neues Item ausrüsten.",
+    )
+
+
+def test_unknown_modifier_resolution_is_bounded_and_conservative() -> None:
+    from unittest.mock import AsyncMock
+
+    parse = AsyncMock(return_value=SimpleNamespace(output_parsed={
+        "resolutions": [
+            {"modifier_index": 2, "normalized_key": "fire_resistance", "confidence": "high"},
+            {"modifier_index": 3, "normalized_key": "maximum_life", "confidence": "medium"},
+            {"modifier_index": 4, "normalized_key": "maximum_life", "confidence": "high"},
+            {"modifier_index": 4, "normalized_key": "maximum_mana", "confidence": "high"},
+        ]
+    }))
+    provider = OpenAIEvaluationProvider(
+        api_key="test", model="test-model", reasoning_effort="low", timeout=1,
+        max_retries=0, max_input_chars=20_000, max_output_tokens=3_000,
+        rate_limit_per_minute=1,
+        client=SimpleNamespace(responses=SimpleNamespace(parse=parse)),
+    )
+
+    resolved = asyncio.run(provider.resolve_unknown_modifiers([
+        (2, "Feuerwiderstand " + "x" * 600),
+        (3, "maximales Leben"),
+        (4, "mehr von irgendetwas"),
+    ]))
+
+    assert resolved == [{
+        "modifier_index": 2, "normalized_key": "fire_resistance", "confidence": "high"
+    }]
+    request = parse.await_args.kwargs
+    assert request["store"] is False
+    payload = json.loads(request["input"][0]["content"])
+    assert len(payload["unknown_german_modifiers"][0]["raw_text"]) == 500
+    assert len(provider.limiter._calls) == 0
+    assert len(provider.resolution_limiter._calls) == 1
+    assert asyncio.run(provider.resolve_unknown_modifiers([(2, "Feuerwiderstand")])) == []
+    assert parse.await_count == 1
+    assert len(provider.limiter._calls) == 0
+
+
+def test_german_item_locale_uses_headers_not_modifier_vocabulary() -> None:
+    from app.parser.localization import is_german_item_text
+
+    assert is_german_item_text(
+        "Gegenstandsklasse: Zauberstäbe\nSeltenheit: Selten\n+9 zu etwas völlig Neuem"
+    )
+    assert not is_german_item_text(
+        "Item Class: Wands\nRarity: Rare\n+9 to something entirely new"
     )
 
 
@@ -179,6 +229,23 @@ class FailingProvider(FakeProvider):
         raise EvaluationProviderError("provider_refusal", "Sichere Ablehnung.")
 
 
+class ResolvingProvider(FakeProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.unknown: list[tuple[int, str]] = []
+
+    async def resolve_unknown_modifiers(
+        self, modifiers: list[tuple[int, str]]
+    ) -> list[dict[str, object]]:
+        self.unknown = modifiers
+        selected = next(value for value in modifiers if value[1] == "+9 zu völlig Neuem")
+        return [{
+            "modifier_index": selected[0],
+            "normalized_key": "maximum_life",
+            "confidence": "high",
+        }]
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -231,6 +298,32 @@ async def test_evaluate_sends_complete_comparison_context(
     assert provider.received.build.source_variant == "default-variant"
     assert response.json()["evaluation"]["recommendation"] == "better"
     assert "local_check" not in response.json() and "local_comparison" not in response.json()
+
+
+@pytest.mark.anyio
+async def test_evaluate_resolves_unknown_modifier_from_german_item_locale(
+    monkeypatch: pytest.MonkeyPatch, isolated_db: sessionmaker[Session]
+) -> None:
+    provider = ResolvingProvider()
+    monkeypatch.setattr(routes, "get_evaluation_provider", lambda: provider)
+    raw = (ROOT / "tests/fixtures/rare_wand_de.txt").read_text() + "\n+9 zu völlig Neuem"
+    equipped = (ROOT / "tests/fixtures/rare_wand.txt").read_text()
+    with isolated_db() as db:
+        replace_equipment(db, "wand", equipped)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/items/evaluate", json={"raw_text": raw, "target_slot": "wand"}
+        )
+
+    assert response.status_code == 200
+    assert any(raw_text == "+9 zu völlig Neuem" for _, raw_text in provider.unknown)
+    resolution = response.json()["modifier_resolutions"][0]
+    modifier = response.json()["parse"]["item"]["modifiers"][resolution["modifier_index"]]
+    assert modifier["raw_text"] == "+9 zu völlig Neuem"
+    assert modifier["values"] == [9.0]
+    assert modifier["normalized_key"] == "maximum_life"
 
 
 @pytest.mark.anyio

@@ -1,6 +1,6 @@
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.evaluation.provider import EvaluationProviderError
@@ -10,6 +10,7 @@ from app.evaluation.schemas import (
     EvaluateItemResponse,
     EvaluationInput,
     EvaluationResult,
+    ModifierResolution,
 )
 from app.evaluation.service import get_evaluation_provider
 from app.builds.registry import BuildContext
@@ -40,6 +41,7 @@ from app.parser.service import (
     parse_with_safe_auto_format,
     parse_with_warnings,
 )
+from app.parser.localization import is_german_item_text
 from app.schemas.health import HealthResponse
 from app.schemas.parsing import ParseItemRequest, ParseItemResponse
 from app.schemas.items import ParsedItem
@@ -55,7 +57,6 @@ from app.schemas.management import (
 )
 
 router = APIRouter(prefix="/api")
-
 
 def _citation_key(url: str) -> tuple[str, str, int | None, str, str]:
     parsed = urlsplit(url)
@@ -238,6 +239,23 @@ async def parse_item(request: ParseItemRequest) -> ParseItemResponse:
     return parse_with_warnings(request.raw_text)
 
 
+@router.post("/items/ocr")
+async def ocr_item(image: UploadFile = File(...)) -> dict[str, str]:
+    from app.core.config import get_settings
+    from app.ocr.service import OcrError, recognize
+
+    settings = get_settings()
+    data = await image.read(settings.ocr_max_bytes + 1)
+    content_type = image.content_type
+    await image.close()
+    try:
+        return {"text": await recognize(data, content_type)}
+    except OcrError as exc:
+        raise HTTPException(
+            exc.status_code, detail={"code": exc.code, "message": exc.message}
+        ) from exc
+
+
 @router.post("/items/evaluate", response_model=EvaluateItemResponse)
 async def evaluate_item(
     request: EvaluateItemRequest,
@@ -256,6 +274,7 @@ async def evaluate_item(
             },
         )
     parsed = parse_with_safe_auto_format(request.raw_text)
+    modifier_resolutions: list[ModifierResolution] = []
     if any(warning.code in BLOCKING_WARNING_CODES for warning in parsed.warnings):
         raise HTTPException(
             status_code=422,
@@ -356,6 +375,26 @@ async def evaluate_item(
     else:
         try:
             provider = get_evaluation_provider()
+            unknown_german = [
+                (index, modifier.raw_text)
+                for index, modifier in enumerate(parsed.item.modifiers)
+                if modifier.normalized_key == "unknown"
+            ] if is_german_item_text(parsed.item.raw_text) else []
+            resolver = getattr(provider, "resolve_unknown_modifiers", None)
+            if unknown_german and resolver is not None:
+                resolved = await resolver(unknown_german)
+                modifiers = list(parsed.item.modifiers)
+                for value in resolved:
+                    index = value["modifier_index"]
+                    if index >= len(modifiers) or modifiers[index].normalized_key != "unknown":
+                        continue
+                    modifiers[index] = modifiers[index].model_copy(
+                        update={"normalized_key": value["normalized_key"]}
+                    )
+                    modifier_resolutions.append(ModifierResolution.model_validate(value))
+                if modifier_resolutions:
+                    parsed.item = parsed.item.model_copy(update={"modifiers": modifiers})
+                    evaluation_input.candidate = parsed.item
             evaluation = await provider.evaluate(evaluation_input)
         except EvaluationProviderError as exc:
             return EvaluateItemResponse(
@@ -372,6 +411,7 @@ async def evaluate_item(
                 model=None,
                 provider_status="unavailable",
                 provider_error={"code": exc.code, "message": exc.public_message},
+                modifier_resolutions=modifier_resolutions,
                 disclaimer=(
                     "API-Empfehlung nicht verfügbar. Es wurde keine lokale Empfehlung "
                     "oder Ersatzbewertung erzeugt."
@@ -404,6 +444,7 @@ async def evaluate_item(
         model=provider.model if provider else "empty-slot-rule",
         provider_status="success",
         provider_error=None,
+        modifier_resolutions=modifier_resolutions,
         disclaimer=(
             "API-gestützter Candidate-vs-Equipped-Vergleich. Keine Marktwert- oder "
             "Crafting-Bewertung."

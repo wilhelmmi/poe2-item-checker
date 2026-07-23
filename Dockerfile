@@ -8,6 +8,7 @@ RUN npm run build
 FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATABASE_URL=sqlite:////data/app.db
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
