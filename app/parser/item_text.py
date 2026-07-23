@@ -2,23 +2,29 @@ import re
 
 from app.parser.modifier_headers import ModifierHeader, parse_modifier_header
 from app.parser.normalizations import normalize_modifier
+from app.parser.localization import canonical_item_class, canonical_rarity
 from app.schemas.items import ModifierData, ParsedItem
 
 NUMBER_RE = re.compile(
-    r"(?<![A-Za-z])([+-]?\d+(?:\.\d+)?)(?:\(([-+]?\d+(?:\.\d+)?)-([-+]?\d+(?:\.\d+)?)\))?"
+    r"(?<![A-Za-z])([+-]?\d+(?:[.,]\d+)?)(?:\(([-+]?\d+(?:[.,]\d+)?)-([-+]?\d+(?:[.,]\d+)?)\))?"
 )
 
 
 def _number(value: str) -> int | float:
-    parsed = float(value)
+    parsed = float(value.replace(",", "."))
     return int(parsed) if parsed.is_integer() else parsed
 
 
 def _modifier(line: str, header: ModifierHeader | None = None) -> ModifierData:
     source = header.source if header else "explicit"
-    annotation = re.search(r"\((rune|crafted|desecrated|implicit)\)\s*$", line, re.I)
+    annotation = re.search(
+        r"\((rune|crafted|desecrated|implicit|hergestellt|entweiht|implizit)\)\s*$",
+        line, re.I,
+    )
     if annotation:
-        source = annotation.group(1).lower()
+        source = {
+            "hergestellt": "crafted", "entweiht": "desecrated", "implizit": "implicit"
+        }.get(annotation.group(1).lower(), annotation.group(1).lower())
     matches = list(NUMBER_RE.finditer(line))
     values = [_number(match.group(1)) for match in matches]
     ranges = [
@@ -59,10 +65,12 @@ def _parse_identity(block: list[str], data: dict[str, object]) -> None:
     remaining: list[str] = []
     for line in block:
         stripped = line.strip()
-        if stripped.startswith("Item Class: "):
-            data["item_class"] = stripped.removeprefix("Item Class: ")
-        elif stripped.startswith("Rarity: "):
-            data["rarity"] = stripped.removeprefix("Rarity: ")
+        identity = re.match(r"(?:Item Class|Gegenstandsklasse):\s*(.+)", stripped, re.I)
+        rarity_line = re.match(r"(?:Rarity|Seltenheit):\s*(.+)", stripped, re.I)
+        if identity:
+            data["item_class"] = canonical_item_class(identity.group(1))
+        elif rarity_line:
+            data["rarity"] = canonical_rarity(rarity_line.group(1))
         else:
             remaining.append(stripped)
     rarity = data.get("rarity")
@@ -83,44 +91,57 @@ def _parse_identity(block: list[str], data: dict[str, object]) -> None:
 
 def _parse_structured(line: str, data: dict[str, object], requirements: bool) -> bool:
     stripped = line.strip()
-    compact = re.match(r"Requires:\s*(.+)", stripped)
+    compact = re.match(r"(?:Requires|Erfordert):\s*(.+)", stripped, re.I)
     if compact:
         requirements_text = compact.group(1)
-        pairs = re.findall(r"(Level|Str|Dex|Int)\s+(\d+)", requirements_text)
-        pairs.extend((label, value) for value, label in re.findall(r"(\d+)\s+(Str|Dex|Int)", requirements_text))
+        pairs = re.findall(r"(Level|Stufe|Str|Dex|Ges|Int)\s+(\d+)", requirements_text, re.I)
+        pairs.extend((label, value) for value, label in re.findall(r"(\d+)\s+(Level|Stufe|Str|Dex|Ges|Int)", requirements_text, re.I))
         for label, value in pairs:
-            key = {"Level": "required_level", "Str": "required_strength", "Dex": "required_dexterity", "Int": "required_intelligence"}[label]
+            key = {"level": "required_level", "stufe": "required_level", "str": "required_strength",
+                   "dex": "required_dexterity", "ges": "required_dexterity",
+                   "int": "required_intelligence"}[label.lower()]
             data[key] = int(value)
         return True
-    requirement = re.match(r"(Level|Str|Dex|Int):\s*(\d+)", stripped)
+    requirement = re.match(r"(Level|Stufe|Str|Dex|Ges|Int):\s*(\d+)", stripped, re.I)
     if requirements and requirement:
-        key = {"Level": "required_level", "Str": "required_strength", "Dex": "required_dexterity", "Int": "required_intelligence"}[requirement.group(1)]
+        key = {"level": "required_level", "stufe": "required_level", "str": "required_strength",
+               "dex": "required_dexterity", "ges": "required_dexterity",
+               "int": "required_intelligence"}[requirement.group(1).lower()]
         data[key] = int(requirement.group(2))
         return True
-    prop = re.match(r"(Item Level|Quality|Armour|Evasion|Energy Shield|Spirit):\s*\+?(\d+)(.*)$", stripped)
+    prop = re.match(
+        r"(Item Level|Gegenstandsstufe|Quality|Qualität|Armour|Rüstung|Evasion|Ausweichwert|"
+        r"Energy Shield|Energieschild|Spirit|Willenskraft):\s*\+?(\d+)(.*)$", stripped, re.I,
+    )
     if prop:
-        key = prop.group(1).lower().replace(" ", "_")
+        key = {
+            "gegenstandsstufe": "item_level", "qualität": "quality", "rüstung": "armour",
+            "ausweichwert": "evasion", "energieschild": "energy_shield",
+            "willenskraft": "spirit",
+        }.get(prop.group(1).lower(), prop.group(1).lower().replace(" ", "_"))
         data[key] = int(prop.group(2))
         if key in {"armour", "evasion", "energy_shield"}:
-            data[f"{key}_augmented"] = "(augmented)" in prop.group(3).lower()
+            data[f"{key}_augmented"] = bool(re.search(r"\((?:augmented|erhöht|verstärkt)\)", prop.group(3), re.I))
         return True
-    if stripped.startswith("Sockets: "):
-        data["sockets"] = stripped.removeprefix("Sockets: ").split()
+    sockets = re.match(r"(?:Sockets|Fassungen):\s*(.+)", stripped, re.I)
+    if sockets:
+        data["sockets"] = sockets.group(1).split()
         return True
-    if stripped.startswith("Grants Skill: "):
-        skill = stripped.removeprefix("Grants Skill: ")
+    grants = re.match(r"(?:Grants Skill|Gewährt Fertigkeit):\s*(.+)", stripped, re.I)
+    if grants:
+        skill = grants.group(1)
         data["granted_skill"] = skill
         data["modifiers"].append(  # type: ignore[union-attr]
             _modifier(skill, ModifierHeader(source="granted_skill"))
         )
         return True
-    if stripped == "Corrupted":
+    if stripped in {"Corrupted", "Verderbt"}:
         data["corrupted"] = True
         return True
-    if stripped == "Unidentified":
+    if stripped in {"Unidentified", "Nicht identifiziert"}:
         data["identified"] = False
         return True
-    return stripped == "Requirements:"
+    return stripped in {"Requirements:", "Anforderungen:"}
 
 
 def parse_item_text(raw_text: str) -> ParsedItem:
@@ -136,7 +157,7 @@ def parse_item_text(raw_text: str) -> ParsedItem:
         _parse_identity(blocks[0], data)
 
     for block_index, block in enumerate(blocks[1:], start=1):
-        requirements = bool(block and block[0].strip() == "Requirements:")
+        requirements = bool(block and block[0].strip() in {"Requirements:", "Anforderungen:"})
         active_header: ModifierHeader | None = None
         block_has_header = any(parse_modifier_header(line.strip()) for line in block)
         structured_count = 0
@@ -152,7 +173,7 @@ def parse_item_text(raw_text: str) -> ParsedItem:
                 continue
             if active_header:
                 data["modifiers"].append(_modifier(stripped, active_header))  # type: ignore[union-attr]
-            elif re.search(r"\((rune|crafted|desecrated|implicit)\)\s*$", stripped, re.I):
+            elif re.search(r"\((rune|crafted|desecrated|implicit|hergestellt|entweiht|implizit)\)\s*$", stripped, re.I):
                 data["modifiers"].append(_modifier(stripped))  # type: ignore[union-attr]
             else:
                 pending.append(line)

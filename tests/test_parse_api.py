@@ -87,6 +87,35 @@ async def test_collapsed_rare_with_two_word_name_and_base_is_safe(client: httpx.
 
 
 @pytest.mark.anyio
+async def test_collapsed_german_magic_item_is_safely_reformatted(client: httpx.AsyncClient) -> None:
+    raw = (
+        "Gegenstandsklasse: Stiefel Seltenheit: Magisch Schnelle Stiefel -------- "
+        "Gegenstandsstufe: 66 -------- { Präfix-Modifikator — Tempo } "
+        "30% erhöhte Bewegungsgeschwindigkeit"
+    )
+    body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
+    assert body["auto_format_status"] == "safe"
+    formatted = body["line_break_suggestion"]["suggested_text"]
+    repost = (await client.post("/api/items/parse", json={"raw_text": formatted})).json()
+    assert repost["item"]["item_class"] == "Boots"
+    assert repost["item"]["modifiers"][0]["normalized_key"] == "movement_speed"
+
+
+@pytest.mark.anyio
+async def test_collapsed_german_rare_item_is_never_safely_reformatted(
+    client: httpx.AsyncClient,
+) -> None:
+    raw = (
+        "Gegenstandsklasse: Zauberstäbe Seltenheit: Selten Unheil-Nadel "
+        "Verdorrter Zauberstab -------- Gegenstandsstufe: 67 -------- "
+        "{ Präfix-Modifikator — Zauberwirker } 30% erhöhter Zauberschaden"
+    )
+    body = (await client.post("/api/items/parse", json={"raw_text": raw})).json()
+    assert body["auto_format_status"] == "ambiguous"
+    assert body["line_break_suggestion"] is not None
+
+
+@pytest.mark.anyio
 async def test_blank_input_is_rejected_without_trimming_valid_input(
     client: httpx.AsyncClient,
 ) -> None:

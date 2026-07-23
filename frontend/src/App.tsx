@@ -68,8 +68,8 @@ export function App() {
       <div className="primary-column">
         <form className="panel candidate-panel" onSubmit={compare}>
           <div className="panel-heading"><div><p className="step-label">Item-Analyse</p><h2>Candidate vergleichen</h2></div><span className="slot-hint">Slot wird automatisch erkannt</span></div>
-          <p className="section-intro">Füge den vollständigen englischen Itemtext aus dem Spiel ein. Der Vergleich erfolgt nur mit dem passenden ausgerüsteten Slot.</p>
-          <label htmlFor="itemtext">Englischen Itemtext einfügen</label>
+          <p className="section-intro">Füge den vollständigen deutschen oder englischen Itemtext aus dem Spiel ein. Der Vergleich erfolgt nur mit dem passenden ausgerüsteten Slot.</p>
+          <label htmlFor="itemtext">Deutschen oder englischen Itemtext einfügen</label>
           <textarea id="itemtext" className="item-input" rows={15} placeholder={'Item Class: Wands\nRarity: Rare\n…'} value={rawText} onChange={e=>{setRawText(e.target.value);invalidate()}}/>
           <div className="form-footer"><span>{rawText.trim() ? `${rawText.length} Zeichen` : 'Bereit für deinen Itemtext'}</span><button className="primary-action" disabled={loading||!rawText.trim()||!buildId}>{loading?<><span className="spinner" aria-hidden="true"/>API vergleicht …</>:'Mit ausgerüstetem Item vergleichen'}</button></div>
         </form>
